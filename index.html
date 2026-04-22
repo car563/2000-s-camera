@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2000 Digital Camera & Video Emulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #1a1a1a;
+            background-image: radial-gradient(circle at 50% 50%, #2a2a2a 0%, #111 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: manipulation;
+        }
+        
+        .camera-body {
+            background: linear-gradient(135deg, #e6e6e6 0%, #a6a6a6 50%, #808080 100%);
+            box-shadow: 
+                inset 0 2px 4px rgba(255,255,255,0.7),
+                inset 0 -4px 6px rgba(0,0,0,0.3),
+                0 10px 25px rgba(0,0,0,0.6);
+            border: 1px solid #666;
+        }
+
+        .camera-bezel {
+            background: #0f0f0f;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+            border: 2px solid #222;
+            border-bottom-color: #444;
+            border-right-color: #444;
+        }
+
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            image-rendering: pixelated; 
+        }
+
+        .shutter-btn {
+            background: radial-gradient(circle at 30% 30%, #e0e0e0, #888);
+            box-shadow: 
+                inset 0 2px 4px rgba(255,255,255,0.8),
+                0 4px 6px rgba(0,0,0,0.4);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        
+        .shutter-btn:active, .shutter-btn.recording {
+            transform: translateY(2px);
+            box-shadow: 
+                inset 0 4px 8px rgba(0,0,0,0.6),
+                0 1px 2px rgba(0,0,0,0.4);
+        }
+
+        .shutter-btn.recording {
+            background: radial-gradient(circle at 30% 30%, #ff6b6b, #cc0000);
+        }
+
+        .shutter-ring {
+            background: #d4d4d4;
+            border: 1px solid #777;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .retro-text {
+            font-family: 'VT323', monospace;
+            text-shadow: 2px 2px 0px rgba(0,0,0,0.8);
+        }
+
+        #flash-overlay {
+            position: absolute;
+            inset: 0;
+            background: white;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease-out;
+            z-index: 50;
+        }
+
+        #flash-overlay.flash-active {
+            opacity: 1;
+            transition: opacity 0.05s ease-in;
+        }
+
+        .gallery-scrollbar::-webkit-scrollbar {
+            height: 8px;
+        }
+        .gallery-scrollbar::-webkit-scrollbar-track {
+            background: #333;
+            border-radius: 4px;
+        }
+        .gallery-scrollbar::-webkit-scrollbar-thumb {
+            background: #666;
+            border-radius: 4px;
+        }
+
+        .media-item {
+            width: 128px;
+            height: 96px;
+            object-fit: cover;
+            border-radius: 0.375rem;
+            border: 2px solid #4b5563;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .media-item:hover {
+            border-color: #fff;
+        }
+        
+        /* The fix for mobile browsers stopping hidden videos */
+        .visually-hidden-video {
+            position: absolute;
+            top: -9999px;
+            left: -9999px;
+            width: 1px;
+            height: 1px;
+            opacity: 0.01;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+
+    <!-- Error Message Display -->
+    <div id="error-msg" class="hidden bg-red-600 text-white p-4 rounded-md mb-4 max-w-md text-center shadow-lg">
+        Unable to access camera or microphone. Please ensure permissions are granted.
+    </div>
+
+    <!-- The Digital Camera Wrapper -->
+    <div class="camera-body w-full max-w-lg rounded-2xl p-4 sm:p-6 flex flex-col gap-4 relative">
+        
+        <div class="flex justify-between items-center text-xs text-gray-700 font-bold uppercase tracking-widest px-2">
+            <span>OptiPix</span>
+            <span>1.3 MegaPixels / QQVGA Video</span>
+        </div>
+
+        <div class="camera-bezel p-2 sm:p-3 rounded-lg relative">
+            <div class="canvas-container rounded bg-black">
+                
+                <!-- Fixed Video Element - No longer uses 'hidden' class -->
+                <video id="video-feed" class="visually-hidden-video" playsinline autoplay muted></video>
+                
+                <!-- Main visible canvas -->
+                <canvas id="viewfinder" width="640" height="480"></canvas>
+                
+                <div id="flash-overlay"></div>
+
+                <div class="absolute top-2 left-2 flex gap-2">
+                    <div class="w-8 h-4 border-2 border-white rounded-sm relative opacity-80">
+                        <div class="absolute top-0 left-0 bottom-0 w-2/3 bg-white m-[2px]"></div>
+                        <div class="absolute top-1 -right-1.5 w-1 h-1.5 bg-white rounded-r-sm"></div>
+                    </div>
+                    <span id="mode-indicator" class="retro-text text-green-400 text-xl leading-none opacity-90">PHOTO</span>
+                </div>
+
+                <div class="absolute top-2 right-2 flex flex-col items-end">
+                    <span class="retro-text text-white text-xl leading-none opacity-90 shadow-black drop-shadow-md">SD</span>
+                    <span id="icon-indicator" class="retro-text text-yellow-400 text-lg leading-none opacity-90 mt-1">📸</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-between mt-2 px-2">
+            <div class="flex flex-col gap-2">
+                <button onclick="toggleMode()" class="w-16 h-8 bg-[#888] rounded-sm shadow border-b-2 border-gray-500 active:border-b-0 active:translate-y-0.5 text-[10px] font-bold text-gray-900 flex items-center justify-center gap-1">
+                    <span id="btn-mode-text">🎥 VIDEO</span>
+                </button>
+                <button onclick="switchCamera()" class="w-16 h-8 bg-[#888] rounded-sm shadow border-b-2 border-gray-500 active:border-b-0 active:translate-y-0.5 text-[10px] font-bold text-gray-900 flex items-center justify-center gap-1">
+                    <span>🔄 FLIP</span>
+                </button>
+            </div>
+
+            <div class="flex flex-col items-center justify-center cursor-pointer" onclick="handleShutter()">
+                <div class="shutter-ring w-20 h-20 rounded-full flex items-center justify-center">
+                    <div id="shutter-btn" class="shutter-btn w-16 h-16 rounded-full"></div>
+                </div>
+                <span class="text-[10px] font-bold text-gray-700 mt-1 uppercase tracking-widest">Shutter</span>
+            </div>
+
+            <div class="w-12 h-12 flex flex-wrap gap-1 justify-center items-center opacity-40">
+                <div class="w-1.5 h-1.5 bg-black rounded-full"></div><div class="w-1.5 h-1.5 bg-black rounded-full"></div><div class="w-1.5 h-1.5 bg-black rounded-full"></div>
+                <div class="w-1.5 h-1.5 bg-black rounded-full"></div><div class="w-1.5 h-1.5 bg-black rounded-full"></div><div class="w-1.5 h-1.5 bg-black rounded-full"></div>
+                <div class="w-1.5 h-1.5 bg-black rounded-full"></div><div class="w-1.5 h-1.5 bg-black rounded-full"></div><div class="w-1.5 h-1.5 bg-black rounded-full"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="w-full max-w-lg mt-6">
+        <h3 class="text-gray-400 text-sm mb-2 uppercase tracking-wide font-bold px-1">Memory Card (SD)</h3>
+        <div id="gallery" class="flex gap-4 overflow-x-auto pb-4 gallery-scrollbar"></div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video-feed');
+        const canvas = document.getElementById('viewfinder');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const flashOverlay = document.getElementById('flash-overlay');
+        const errorMsg = document.getElementById('error-msg');
+        const gallery = document.getElementById('gallery');
+        
+        const modeIndicator = document.getElementById('mode-indicator');
+        const iconIndicator = document.getElementById('icon-indicator');
+        const btnModeText = document.getElementById('btn-mode-text');
+        const shutterBtn = document.getElementById('shutter-btn');
+        
+        let currentStream = null;
+        let facingMode = 'environment';
+        let animationFrameId = null;
+
+        let isVideoMode = false;
+        let isRecording = false;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let recordingStartTime = 0;
+
+        const offscreenCanvas = document.createElement('canvas');
+        const offCtx = offscreenCanvas.getContext('2d');
+        const LOW_RES_WIDTH = 160; 
+        const LOW_RES_HEIGHT = 120;
+        offscreenCanvas.width = LOW_RES_WIDTH;
+        offscreenCanvas.height = LOW_RES_HEIGHT;
+
+        const noiseCanvas = document.createElement('canvas');
+        noiseCanvas.width = LOW_RES_WIDTH;
+        noiseCanvas.height = LOW_RES_HEIGHT;
+        const noiseCtx = noiseCanvas.getContext('2d');
+        const noiseData = noiseCtx.createImageData(LOW_RES_WIDTH, LOW_RES_HEIGHT);
+        for (let i = 0; i < noiseData.data.length; i += 4) {
+            const val = Math.random() * 255;
+            noiseData.data[i] = val;     
+            noiseData.data[i+1] = val;   
+            noiseData.data[i+2] = val;   
+            noiseData.data[i+3] = 40;    
+        }
+        noiseCtx.putImageData(noiseData, 0, 0);
+
+        async function initCamera() {
+            // Clean up previous streams safely
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+
+            try {
+                const constraints = {
+                    video: { facingMode: facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: true
+                };
+                
+                try {
+                    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch(e) {
+                    console.warn("Microphone access denied, falling back to video only.");
+                    constraints.audio = false;
+                    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                }
+
+                video.srcObject = currentStream;
+                errorMsg.classList.add('hidden');
+                
+                // Wait firmly for the video to begin playing before starting the loop
+                video.onplaying = () => {
+                    if (!animationFrameId) {
+                        processFrame();
+                    }
+                };
+
+                // Trigger play manually (required on some mobile browsers)
+                try {
+                    await video.play();
+                } catch (playError) {
+                    console.error("Autoplay prevented:", playError);
+                }
+                
+            } catch (err) {
+                console.error("Camera access error:", err);
+                errorMsg.classList.remove('hidden');
+            }
+        }
+
+        // --- STABLE FRAME LOOP ---
+        function processFrame() {
+            if (!currentStream) return;
+
+            try {
+                // Ensure video is actively rendering and has loaded its dimensions
+                if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+                    
+                    let srcWidth = video.videoWidth;
+                    let srcHeight = video.videoHeight;
+                    let srcX = 0, srcY = 0;
+                    
+                    const targetRatio = 4/3;
+                    const srcRatio = srcWidth / srcHeight;
+
+                    if (srcRatio > targetRatio) {
+                        let newWidth = srcHeight * targetRatio;
+                        srcX = (srcWidth - newWidth) / 2;
+                        srcWidth = newWidth;
+                    } else {
+                        let newHeight = srcWidth / targetRatio;
+                        srcY = (srcHeight - newHeight) / 2;
+                        srcHeight = newHeight;
+                    }
+
+                    offCtx.drawImage(video, srcX, srcY, srcWidth, srcHeight, 0, 0, LOW_RES_WIDTH, LOW_RES_HEIGHT);
+
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.imageSmoothingEnabled = false; 
+                    
+                    // The 2000 aesthetic filters (lower quality, worse color balance)
+                    ctx.filter = 'contrast(1.4) saturate(0.6) sepia(0.4) hue-rotate(-10deg) brightness(1.1)';
+                    ctx.drawImage(offscreenCanvas, 0, 0, canvas.width, canvas.height);
+                    ctx.filter = 'none';
+
+                    // Noise Layer
+                    ctx.globalCompositeOperation = 'overlay';
+                    const offsetX = (Math.random() * 10) - 5;
+                    const offsetY = (Math.random() * 10) - 5;
+                    ctx.drawImage(noiseCanvas, offsetX, offsetY, canvas.width, canvas.height);
+                    ctx.globalCompositeOperation = 'source-over'; 
+
+                    drawDateStamp();
+
+                    if (isRecording) {
+                        drawRecordingOverlay();
+                    }
+                }
+            } catch (error) {
+                console.warn("Frame drop safely caught:", error);
+            }
+            
+            // Re-call the loop frame
+            animationFrameId = requestAnimationFrame(processFrame);
+        }
+
+        function drawDateStamp() {
+            const now = new Date();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const dateStr = `${month}/${day}/2000`;
+
+            ctx.font = '36px "VT323", monospace';
+            ctx.fillStyle = '#ff9900'; 
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+
+            ctx.fillText(dateStr, canvas.width - 20, canvas.height - 15);
+            
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        }
+
+        function drawRecordingOverlay() {
+            const elapsedSeconds = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const mins = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
+            const secs = String(elapsedSeconds % 60).padStart(2, '0');
+
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 4;
+
+            if (Math.floor(Date.now() / 500) % 2 === 0) {
+                ctx.fillStyle = '#ff3333';
+                ctx.beginPath();
+                ctx.arc(40, 40, 10, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.font = '36px "VT323", monospace';
+            ctx.fillStyle = '#ff3333';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`REC ${mins}:${secs}`, 60, 42);
+
+            ctx.shadowBlur = 0;
+        }
+
+        function toggleMode() {
+            if (isRecording) return; 
+            
+            isVideoMode = !isVideoMode;
+            if (isVideoMode) {
+                modeIndicator.innerText = "VIDEO";
+                iconIndicator.innerText = "🎥";
+                btnModeText.innerText = "📸 PHOTO";
+                modeIndicator.classList.replace('text-green-400', 'text-red-400');
+            } else {
+                modeIndicator.innerText = "PHOTO";
+                iconIndicator.innerText = "📸";
+                btnModeText.innerText = "🎥 VIDEO";
+                modeIndicator.classList.replace('text-red-400', 'text-green-400');
+            }
+        }
+
+        function handleShutter() {
+            if (isVideoMode) {
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            } else {
+                takePhoto();
+            }
+        }
+
+        function makeDistortionCurve(amount) {
+            let k = typeof amount === 'number' ? amount : 50,
+                n_samples = 44100,
+                curve = new Float32Array(n_samples),
+                deg = Math.PI / 180,
+                i = 0,
+                x;
+            for ( ; i < n_samples; ++i ) {
+                x = i * 2 / n_samples - 1;
+                curve[i] = ( 3 + k ) * x * 20 * deg / ( Math.PI + k * Math.abs(x) );
+            }
+            return curve;
+        }
+
+        function getRetroAudioTrack(sourceStream) {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                const ctx = new AudioContext();
+                
+                if (ctx.state === 'suspended') {
+                    ctx.resume();
+                }
+
+                const audioTracks = sourceStream.getAudioTracks();
+                if (audioTracks.length === 0) return null;
+
+                const source = ctx.createMediaStreamSource(new MediaStream([audioTracks[0]]));
+                const dest = ctx.createMediaStreamDestination();
+
+                const highpass = ctx.createBiquadFilter();
+                highpass.type = 'highpass';
+                highpass.frequency.value = 600;
+
+                const lowpass = ctx.createBiquadFilter();
+                lowpass.type = 'lowpass';
+                lowpass.frequency.value = 3000;
+
+                const compressor = ctx.createDynamicsCompressor();
+                compressor.threshold.value = -50;
+                compressor.knee.value = 40;
+                compressor.ratio.value = 12;
+                compressor.attack.value = 0;
+                compressor.release.value = 0.25;
+
+                const waveShaper = ctx.createWaveShaper();
+                waveShaper.curve = makeDistortionCurve(40);
+                
+                source.connect(highpass);
+                highpass.connect(lowpass);
+                lowpass.connect(compressor);
+                compressor.connect(waveShaper);
+                waveShaper.connect(dest);
+
+                return dest.stream.getAudioTracks()[0];
+            } catch (e) {
+                console.error("Audio processing failed:", e);
+                return null; 
+            }
+        }
+
+        function startRecording() {
+            recordedChunks = [];
+            
+            // Capture the video at a lower framerate typical of the year 2000
+            const canvasStream = canvas.captureStream(15);
+            const processedAudioTrack = getRetroAudioTrack(currentStream);
+            let tracksToCombine = [...canvasStream.getTracks()];
+            
+            if (processedAudioTrack) {
+                tracksToCombine.push(processedAudioTrack);
+            } else {
+                const origAudio = currentStream.getAudioTracks();
+                if (origAudio.length > 0) tracksToCombine.push(origAudio[0]);
+            }
+            
+            const combinedStream = new MediaStream(tracksToCombine);
+            
+            try {
+                const options = MediaRecorder.isTypeSupported('video/webm') 
+                                ? { mimeType: 'video/webm' } 
+                                : { mimeType: 'video/mp4' };
+                mediaRecorder = new MediaRecorder(combinedStream, options);
+            } catch (e) {
+                console.error("MediaRecorder init failed", e);
+                alert("Recording is not supported in this browser.");
+                return;
+            }
+            
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunks.push(e.data);
+            };
+            
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+                const videoURL = URL.createObjectURL(blob);
+                
+                const vidElem = document.createElement('video');
+                vidElem.src = videoURL;
+                vidElem.controls = true;
+                vidElem.className = 'media-item';
+                
+                gallery.prepend(vidElem);
+            };
+            
+            mediaRecorder.start();
+            isRecording = true;
+            recordingStartTime = Date.now();
+            shutterBtn.classList.add('recording');
+            
+            playShutterSound(true); 
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            isRecording = false;
+            shutterBtn.classList.remove('recording');
+            playShutterSound(false); 
+        }
+
+        function takePhoto() {
+            flashOverlay.classList.add('flash-active');
+            playShutterSound(false);
+
+            setTimeout(() => {
+                flashOverlay.classList.remove('flash-active');
+                
+                const dataURL = canvas.toDataURL('image/jpeg', 0.8);
+                
+                const img = document.createElement('img');
+                img.src = dataURL;
+                img.className = 'media-item';
+                
+                gallery.prepend(img);
+                
+                img.onclick = () => {
+                    const w = window.open('');
+                    w.document.write(`<img src="${dataURL}" style="width:100%; max-width: 640px; margin: 0 auto; display: block;">`);
+                };
+
+            }, 50); 
+        }
+
+        function playShutterSound(isStartRec) {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                const playBeep = (timeOffset) => {
+                    const oscillator = audioCtx.createOscillator();
+                    const gainNode = audioCtx.createGain();
+                    
+                    oscillator.type = 'square';
+                    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime + timeOffset);
+                    oscillator.frequency.exponentialRampToValueAtTime(400, audioCtx.currentTime + timeOffset + 0.1);
+                    
+                    gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime + timeOffset);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + timeOffset + 0.1);
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioCtx.destination);
+                    
+                    oscillator.start(audioCtx.currentTime + timeOffset);
+                    oscillator.stop(audioCtx.currentTime + timeOffset + 0.1);
+                }
+
+                playBeep(0);
+                if (isStartRec) {
+                    playBeep(0.15); 
+                }
+            } catch (e) {
+                console.log("Audio API not supported or blocked");
+            }
+        }
+
+        function switchCamera() {
+            if (isRecording) return;
+            facingMode = facingMode === 'environment' ? 'user' : 'environment';
+            initCamera();
+        }
+
+        window.addEventListener('load', initCamera);
+    </script>
+</body>
+</html>
