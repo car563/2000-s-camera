@@ -103,19 +103,46 @@
             border-radius: 4px;
         }
 
-        .media-item {
+        .media-container {
+            position: relative;
             width: 128px;
             height: 96px;
+            flex-shrink: 0;
+        }
+
+        .media-item {
+            width: 100%;
+            height: 100%;
             object-fit: cover;
             border-radius: 0.375rem;
             border: 2px solid #4b5563;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            flex-shrink: 0;
             cursor: pointer;
             transition: border-color 0.2s;
         }
         .media-item:hover {
             border-color: #fff;
+        }
+
+        .download-btn {
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 10;
+            transition: background 0.2s;
+        }
+        .download-btn:hover {
+            background: rgba(0, 0, 0, 0.9);
         }
         
         /* The fix for mobile browsers stopping hidden videos */
@@ -197,7 +224,10 @@
     </div>
 
     <div class="w-full max-w-lg mt-6">
-        <h3 class="text-gray-400 text-sm mb-2 uppercase tracking-wide font-bold px-1">Memory Card (SD)</h3>
+        <div class="flex justify-between items-end mb-2 px-1">
+            <h3 class="text-gray-400 text-sm uppercase tracking-wide font-bold">Memory Card (SD)</h3>
+            <button id="format-btn" onclick="formatSDCard()" class="text-xs text-red-500 hover:text-red-400 underline uppercase">Format SD</button>
+        </div>
         <div id="gallery" class="flex gap-4 overflow-x-auto pb-4 gallery-scrollbar"></div>
     </div>
 
@@ -223,6 +253,123 @@
         let mediaRecorder = null;
         let recordedChunks = [];
         let recordingStartTime = 0;
+
+        // IndexedDB variables for persistent SD Card storage
+        let db;
+        const dbName = "RetroCameraSDCard";
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(dbName, 1);
+                request.onerror = (event) => reject(event.target.errorCode);
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    resolve(db);
+                };
+                request.onupgradeneeded = (event) => {
+                    db = event.target.result;
+                    const objectStore = db.createObjectStore("media", { keyPath: "id", autoIncrement: true });
+                    objectStore.createIndex("timestamp", "timestamp", { unique: false });
+                };
+            });
+        }
+
+        function saveMedia(item) {
+            return new Promise((resolve, reject) => {
+                item.timestamp = Date.now();
+                const transaction = db.transaction(["media"], "readwrite");
+                const objectStore = transaction.objectStore("media");
+                const request = objectStore.add(item);
+                request.onsuccess = (event) => resolve(event.target.result);
+                request.onerror = (event) => reject(event.target.error);
+            });
+        }
+
+        function loadMedia() {
+            gallery.innerHTML = '';
+            const transaction = db.transaction(["media"], "readonly");
+            const objectStore = transaction.objectStore("media");
+            const index = objectStore.index("timestamp");
+            
+            // Open cursor to iterate backwards (newest first)
+            const request = index.openCursor(null, "prev");
+            
+            request.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    renderMediaItem(cursor.value, false);
+                    cursor.continue();
+                }
+            };
+        }
+
+        function formatSDCard() {
+            const btn = document.getElementById('format-btn');
+            btn.innerText = "Formatting...";
+            const transaction = db.transaction(["media"], "readwrite");
+            const objectStore = transaction.objectStore("media");
+            const request = objectStore.clear();
+            request.onsuccess = () => {
+                gallery.innerHTML = '';
+                setTimeout(() => btn.innerText = "Format SD", 500);
+            };
+        }
+
+        function renderMediaItem(item, prepend = true) {
+            const container = document.createElement('div');
+            container.className = 'media-container';
+
+            let elem;
+            let downloadUrl;
+            let filename;
+
+            if (item.type === 'photo') {
+                elem = document.createElement('img');
+                elem.src = item.data; // Data URL string
+                downloadUrl = item.data;
+                filename = `optipix_${item.timestamp || Date.now()}.jpg`;
+                
+                elem.onclick = () => {
+                    const w = window.open('');
+                    w.document.write(`<img src="${item.data}" style="width:100%; max-width: 640px; margin: 0 auto; display: block;">`);
+                };
+            } else if (item.type === 'video') {
+                elem = document.createElement('video');
+                // Convert the saved Blob into a playable browser URL
+                downloadUrl = URL.createObjectURL(item.data);
+                elem.src = downloadUrl;
+                elem.controls = true;
+                
+                const ext = (item.mimeType && item.mimeType.includes('mp4')) ? 'mp4' : 'webm';
+                filename = `optipix_${item.timestamp || Date.now()}.${ext}`;
+            }
+            
+            elem.className = 'media-item';
+            
+            // Create download button overlay
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'download-btn';
+            downloadBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>`;
+            downloadBtn.title = "Download to Device";
+            downloadBtn.onclick = (e) => {
+                e.stopPropagation(); // prevent triggering image open or video play
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            };
+
+            container.appendChild(elem);
+            container.appendChild(downloadBtn);
+            
+            if (prepend) {
+                gallery.prepend(container);
+            } else {
+                gallery.appendChild(container);
+            }
+        }
 
         const offscreenCanvas = document.createElement('canvas');
         const offCtx = offscreenCanvas.getContext('2d');
@@ -350,22 +497,42 @@
 
         function drawDateStamp() {
             const now = new Date();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            const dateStr = `${month}/${day}/2000`;
-
-            ctx.font = '36px "VT323", monospace';
-            ctx.fillStyle = '#ff9900'; 
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'bottom';
             
-            ctx.shadowColor = 'rgba(0,0,0,0.8)';
-            ctx.shadowBlur = 4;
+            // Classic Camcorder Month Abbreviations
+            const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+            const monthStr = months[now.getMonth()];
+            const day = String(now.getDate()).padStart(2, '0');
+            
+            // Real-time updating clock
+            let hours = now.getHours();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12;
+            hours = hours ? hours : 12; 
+            const mins = String(now.getMinutes()).padStart(2, '0');
+            const secs = String(now.getSeconds()).padStart(2, '0');
+
+            const dateStr = `${monthStr}. ${day} 2000`;
+            const timeStr = `${ampm} ${String(hours).padStart(2, '0')}:${mins}:${secs}`;
+
+            ctx.font = '32px "VT323", monospace';
+            ctx.fillStyle = '#ffffff'; // Classic white recording text
+            
+            // Hard black drop shadow for that classic OSD (On-Screen Display) look
+            ctx.shadowColor = '#000000';
+            ctx.shadowBlur = 0;
             ctx.shadowOffsetX = 2;
             ctx.shadowOffsetY = 2;
 
-            ctx.fillText(dateStr, canvas.width - 20, canvas.height - 15);
+            // Date on bottom left
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(dateStr, 25, canvas.height - 20);
+
+            // Time on bottom right
+            ctx.textAlign = 'right';
+            ctx.fillText(timeStr, canvas.width - 25, canvas.height - 20);
             
+            // Reset shadows
             ctx.shadowBlur = 0;
             ctx.shadowOffsetX = 0;
             ctx.shadowOffsetY = 0;
@@ -376,23 +543,29 @@
             const mins = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
             const secs = String(elapsedSeconds % 60).padStart(2, '0');
 
-            ctx.shadowColor = 'rgba(0,0,0,0.8)';
-            ctx.shadowBlur = 4;
+            ctx.shadowColor = '#000000';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
 
+            // Blinking Red Dot
             if (Math.floor(Date.now() / 500) % 2 === 0) {
                 ctx.fillStyle = '#ff3333';
                 ctx.beginPath();
-                ctx.arc(40, 40, 10, 0, Math.PI * 2);
+                ctx.arc(35, 35, 8, 0, Math.PI * 2);
                 ctx.fill();
             }
 
-            ctx.font = '36px "VT323", monospace';
-            ctx.fillStyle = '#ff3333';
+            // REC text and Timer in white
+            ctx.font = '32px "VT323", monospace';
+            ctx.fillStyle = '#ffffff';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(`REC ${mins}:${secs}`, 60, 42);
+            ctx.fillText(`REC  ${mins}:${secs}`, 55, 36);
 
             ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
         }
 
         function toggleMode() {
@@ -518,14 +691,12 @@
             
             mediaRecorder.onstop = () => {
                 const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
-                const videoURL = URL.createObjectURL(blob);
                 
-                const vidElem = document.createElement('video');
-                vidElem.src = videoURL;
-                vidElem.controls = true;
-                vidElem.className = 'media-item';
-                
-                gallery.prepend(vidElem);
+                const item = { type: 'video', data: blob, mimeType: mediaRecorder.mimeType };
+                saveMedia(item).then(id => {
+                    item.id = id;
+                    renderMediaItem(item, true); // Add to UI
+                }).catch(e => console.error("Failed to save video to SD card", e));
             };
             
             mediaRecorder.start();
@@ -554,16 +725,11 @@
                 
                 const dataURL = canvas.toDataURL('image/jpeg', 0.8);
                 
-                const img = document.createElement('img');
-                img.src = dataURL;
-                img.className = 'media-item';
-                
-                gallery.prepend(img);
-                
-                img.onclick = () => {
-                    const w = window.open('');
-                    w.document.write(`<img src="${dataURL}" style="width:100%; max-width: 640px; margin: 0 auto; display: block;">`);
-                };
+                const item = { type: 'photo', data: dataURL };
+                saveMedia(item).then(id => {
+                    item.id = id;
+                    renderMediaItem(item, true); // Add to UI
+                }).catch(e => console.error("Failed to save photo to SD card", e));
 
             }, 50); 
         }
@@ -605,7 +771,16 @@
             initCamera();
         }
 
-        window.addEventListener('load', initCamera);
+        window.addEventListener('load', async () => {
+            try {
+                // Boot up the internal SD card storage before initializing the camera
+                await initDB();
+                loadMedia();
+            } catch (e) {
+                console.error("Could not initialize SD Card storage:", e);
+            }
+            initCamera();
+        });
     </script>
 </body>
 </html>
