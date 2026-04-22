@@ -236,7 +236,9 @@
         <div class="bg-[#2a2a2a] w-full max-w-sm rounded-t-2xl sm:rounded-2xl p-5 border border-gray-600 shadow-2xl transform transition-transform translate-y-full sm:translate-y-0 duration-300" id="download-modal-content">
             <h3 class="text-white text-xl font-bold mb-2 font-['Segoe_UI']">Save Media</h3>
             <p class="text-gray-400 text-sm mb-5">Choose how you want to save this file to your device.</p>
-            <div class="flex flex-col gap-3">
+            
+            <!-- Action Buttons Container -->
+            <div id="download-actions" class="flex flex-col gap-3">
                 <button id="btn-save-photos" class="bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors text-lg shadow-md">
                     <span>📸</span> Save to Photos
                 </button>
@@ -246,6 +248,17 @@
                 <button id="btn-cancel-download" class="mt-2 bg-transparent text-gray-400 py-3 rounded-xl font-semibold transition-colors hover:bg-gray-800 hover:text-white">
                     Cancel
                 </button>
+            </div>
+
+            <!-- Progress Bar Container (Hidden by default) -->
+            <div id="download-progress" class="hidden flex-col gap-3 py-4">
+                <div class="flex justify-between items-center text-sm font-semibold">
+                    <span id="download-status-text" class="text-gray-300">Processing...</span>
+                    <span id="download-percentage" class="text-white">0%</span>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-4 overflow-hidden shadow-inner">
+                    <div id="download-progress-bar" class="bg-gradient-to-r from-blue-500 to-cyan-400 h-4 rounded-full w-0 transition-all duration-150 ease-out"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -277,9 +290,17 @@
         let currentDownloadItem = null;
         const downloadModal = document.getElementById('download-modal');
         const downloadModalContent = document.getElementById('download-modal-content');
+        
+        // Progress Bar Elements
+        const downloadActions = document.getElementById('download-actions');
+        const downloadProgress = document.getElementById('download-progress');
+        const downloadProgressBar = document.getElementById('download-progress-bar');
+        const downloadPercentage = document.getElementById('download-percentage');
+        const downloadStatusText = document.getElementById('download-status-text');
 
         function openDownloadModal(downloadUrl, filename, mediaData, isPhoto) {
             currentDownloadItem = { downloadUrl, filename, data: mediaData, isPhoto };
+            resetDownloadUI();
             downloadModal.classList.remove('hidden');
             // Brief delay to let the display block apply before translating to animate it sliding up
             requestAnimationFrame(() => {
@@ -294,14 +315,51 @@
             setTimeout(() => {
                 downloadModal.classList.add('hidden');
                 currentDownloadItem = null;
+                resetDownloadUI();
             }, 300); // Wait for slide down animation to finish
+        }
+
+        function resetDownloadUI() {
+            downloadActions.classList.remove('hidden');
+            downloadProgress.classList.add('hidden');
+            downloadProgressBar.style.width = '0%';
+            downloadPercentage.innerText = '0%';
+        }
+
+        // Simulates a loading progress bar before executing the download
+        function simulateProgress(statusText) {
+            return new Promise((resolve) => {
+                downloadActions.classList.add('hidden');
+                downloadProgress.classList.remove('hidden');
+                downloadStatusText.innerText = statusText;
+                
+                let progress = 0;
+                // Add a slightly random interval to make it feel like a real file operation
+                const interval = setInterval(() => {
+                    progress += Math.floor(Math.random() * 15) + 5;
+                    
+                    if (progress >= 100) {
+                        progress = 100;
+                        clearInterval(interval);
+                        downloadProgressBar.style.width = '100%';
+                        downloadPercentage.innerText = '100%';
+                        setTimeout(resolve, 300); // Wait a tiny bit at 100% before resolving
+                    } else {
+                        downloadProgressBar.style.width = `${progress}%`;
+                        downloadPercentage.innerText = `${progress}%`;
+                    }
+                }, 100);
+            });
         }
 
         document.getElementById('btn-cancel-download').addEventListener('click', closeDownloadModal);
 
         // Option 1: Save as File (Standard Direct Download)
-        document.getElementById('btn-save-file').addEventListener('click', () => {
+        document.getElementById('btn-save-file').addEventListener('click', async () => {
             if (!currentDownloadItem) return;
+            
+            await simulateProgress('Saving to files...');
+            
             const a = document.createElement('a');
             a.href = currentDownloadItem.downloadUrl;
             a.download = currentDownloadItem.filename;
@@ -314,6 +372,8 @@
         // Option 2: Save to Photos (Web Share API - Triggers native iOS/Android Share Sheet)
         document.getElementById('btn-save-photos').addEventListener('click', async () => {
             if (!currentDownloadItem) return;
+            
+            await simulateProgress('Preparing for Photos...');
             
             try {
                 let fileToShare;
