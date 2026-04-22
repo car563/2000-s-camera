@@ -369,7 +369,7 @@
             closeDownloadModal();
         });
 
-        // Option 2: Save to Photos (Web Share API - Triggers native iOS/Android Share Sheet)
+        // Option 2: Save to Photos (Web Share API - with improved iOS/Android fallbacks)
         document.getElementById('btn-save-photos').addEventListener('click', async () => {
             if (!currentDownloadItem) return;
             
@@ -378,26 +378,46 @@
             try {
                 let fileToShare;
                 if (currentDownloadItem.isPhoto) {
-                    // Photos are stored as base64 Data URLs, we need to convert to a true File object
+                    // Force strictly image/jpeg for Photos app compatibility
                     const res = await fetch(currentDownloadItem.data);
                     const blob = await res.blob();
-                    fileToShare = new File([blob], currentDownloadItem.filename, { type: blob.type });
+                    fileToShare = new File([blob], currentDownloadItem.filename, { type: 'image/jpeg' });
                 } else {
-                    // Videos are already Blob objects in our IndexedDB, just cast to File
-                    fileToShare = new File([currentDownloadItem.data], currentDownloadItem.filename, { type: currentDownloadItem.data.type });
+                    // Force video/mp4 if possible for iOS compatibility
+                    const mimeType = currentDownloadItem.data.type || 'video/mp4';
+                    fileToShare = new File([currentDownloadItem.data], currentDownloadItem.filename, { type: mimeType });
                 }
 
-                // Check if the current browser supports natively sharing files
                 if (navigator.canShare && navigator.canShare({ files: [fileToShare] })) {
                     await navigator.share({
                         files: [fileToShare],
                         title: 'OptiPix Media',
                     });
+                } else if (currentDownloadItem.isPhoto) {
+                    // Bulletproof fallback for photos on mobile: Tell them to long press
+                    const w = window.open('');
+                    w.document.write(`
+                        <div style="font-family:sans-serif; text-align:center; padding:30px; background:#111; color:#fff; min-height:100vh;">
+                            <h2 style="margin-bottom:10px;">📸 Save Your Photo</h2>
+                            <p style="color:#aaa; margin-bottom:20px;">Press and hold the image below, then tap <b>"Save to Photos"</b></p>
+                            <img src="${currentDownloadItem.data}" style="width:100%; max-width: 500px; margin: 0 auto; border: 4px solid #333; border-radius:8px; box-shadow: 0 10px 25px rgba(0,0,0,0.8);">
+                        </div>
+                    `);
                 } else {
-                    alert("Your browser doesn't support sharing directly to Photos. Please select 'Save as File', or open the media and long-press to save.");
+                    // Bulletproof fallback for videos
+                    alert("Your browser restricts saving videos directly to photos. We will download it to your 'Files' folder instead!");
+                    const a = document.createElement('a');
+                    a.href = currentDownloadItem.downloadUrl;
+                    a.download = currentDownloadItem.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
                 }
             } catch (error) {
                 console.log("Share cancelled by user or failed:", error);
+                if (error.name !== 'AbortError') {
+                    alert("Unable to open the share menu. Try 'Save as File' and check your Downloads folder!");
+                }
             }
             closeDownloadModal();
         });
