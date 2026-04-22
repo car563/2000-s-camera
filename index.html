@@ -231,6 +231,25 @@
         <div id="gallery" class="flex gap-4 overflow-x-auto pb-4 gallery-scrollbar"></div>
     </div>
 
+    <!-- Download Options Modal -->
+    <div id="download-modal" class="fixed inset-0 bg-black/80 hidden z-[100] flex items-end sm:items-center justify-center pb-6 sm:pb-0 transition-opacity">
+        <div class="bg-[#2a2a2a] w-full max-w-sm rounded-t-2xl sm:rounded-2xl p-5 border border-gray-600 shadow-2xl transform transition-transform translate-y-full sm:translate-y-0 duration-300" id="download-modal-content">
+            <h3 class="text-white text-xl font-bold mb-2 font-['Segoe_UI']">Save Media</h3>
+            <p class="text-gray-400 text-sm mb-5">Choose how you want to save this file to your device.</p>
+            <div class="flex flex-col gap-3">
+                <button id="btn-save-photos" class="bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors text-lg shadow-md">
+                    <span>📸</span> Save to Photos
+                </button>
+                <button id="btn-save-file" class="bg-[#444] hover:bg-[#555] text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors text-lg shadow-md">
+                    <span>📁</span> Save as File
+                </button>
+                <button id="btn-cancel-download" class="mt-2 bg-transparent text-gray-400 py-3 rounded-xl font-semibold transition-colors hover:bg-gray-800 hover:text-white">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const video = document.getElementById('video-feed');
         const canvas = document.getElementById('viewfinder');
@@ -253,6 +272,76 @@
         let mediaRecorder = null;
         let recordedChunks = [];
         let recordingStartTime = 0;
+
+        // --- Download Modal Logic ---
+        let currentDownloadItem = null;
+        const downloadModal = document.getElementById('download-modal');
+        const downloadModalContent = document.getElementById('download-modal-content');
+
+        function openDownloadModal(downloadUrl, filename, mediaData, isPhoto) {
+            currentDownloadItem = { downloadUrl, filename, data: mediaData, isPhoto };
+            downloadModal.classList.remove('hidden');
+            // Brief delay to let the display block apply before translating to animate it sliding up
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    downloadModalContent.classList.remove('translate-y-full');
+                });
+            });
+        }
+
+        function closeDownloadModal() {
+            downloadModalContent.classList.add('translate-y-full');
+            setTimeout(() => {
+                downloadModal.classList.add('hidden');
+                currentDownloadItem = null;
+            }, 300); // Wait for slide down animation to finish
+        }
+
+        document.getElementById('btn-cancel-download').addEventListener('click', closeDownloadModal);
+
+        // Option 1: Save as File (Standard Direct Download)
+        document.getElementById('btn-save-file').addEventListener('click', () => {
+            if (!currentDownloadItem) return;
+            const a = document.createElement('a');
+            a.href = currentDownloadItem.downloadUrl;
+            a.download = currentDownloadItem.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            closeDownloadModal();
+        });
+
+        // Option 2: Save to Photos (Web Share API - Triggers native iOS/Android Share Sheet)
+        document.getElementById('btn-save-photos').addEventListener('click', async () => {
+            if (!currentDownloadItem) return;
+            
+            try {
+                let fileToShare;
+                if (currentDownloadItem.isPhoto) {
+                    // Photos are stored as base64 Data URLs, we need to convert to a true File object
+                    const res = await fetch(currentDownloadItem.data);
+                    const blob = await res.blob();
+                    fileToShare = new File([blob], currentDownloadItem.filename, { type: blob.type });
+                } else {
+                    // Videos are already Blob objects in our IndexedDB, just cast to File
+                    fileToShare = new File([currentDownloadItem.data], currentDownloadItem.filename, { type: currentDownloadItem.data.type });
+                }
+
+                // Check if the current browser supports natively sharing files
+                if (navigator.canShare && navigator.canShare({ files: [fileToShare] })) {
+                    await navigator.share({
+                        files: [fileToShare],
+                        title: 'OptiPix Media',
+                    });
+                } else {
+                    alert("Your browser doesn't support sharing directly to Photos. Please select 'Save as File', or open the media and long-press to save.");
+                }
+            } catch (error) {
+                console.log("Share cancelled by user or failed:", error);
+            }
+            closeDownloadModal();
+        });
+        // -----------------------------
 
         // IndexedDB variables for persistent SD Card storage
         let db;
@@ -350,15 +439,11 @@
             const downloadBtn = document.createElement('button');
             downloadBtn.className = 'download-btn';
             downloadBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>`;
-            downloadBtn.title = "Download to Device";
+            downloadBtn.title = "Download Options";
             downloadBtn.onclick = (e) => {
                 e.stopPropagation(); // prevent triggering image open or video play
-                const a = document.createElement('a');
-                a.href = downloadUrl;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+                // Open the new modal instead of directly downloading
+                openDownloadModal(downloadUrl, filename, item.data, item.type === 'photo');
             };
 
             container.appendChild(elem);
