@@ -326,73 +326,74 @@
             downloadPercentage.innerText = '0%';
         }
 
-        // Simulates a loading progress bar before executing the download
-        function simulateProgress(statusText) {
-            return new Promise((resolve) => {
-                downloadActions.classList.add('hidden');
-                downloadProgress.classList.remove('hidden');
-                downloadStatusText.innerText = statusText;
-                
-                let progress = 0;
-                // Add a slightly random interval to make it feel like a real file operation
-                const interval = setInterval(() => {
-                    progress += Math.floor(Math.random() * 15) + 5;
-                    
-                    if (progress >= 100) {
-                        progress = 100;
-                        clearInterval(interval);
-                        downloadProgressBar.style.width = '100%';
-                        downloadPercentage.innerText = '100%';
-                        setTimeout(resolve, 300); // Wait a tiny bit at 100% before resolving
-                    } else {
-                        downloadProgressBar.style.width = `${progress}%`;
-                        downloadPercentage.innerText = `${progress}%`;
-                    }
-                }, 100);
-            });
+        // We must remove the fake loading delay. Mobile browsers (especially Safari) 
+        // will block the native Share Menu if it doesn't open the exact millisecond you tap the button.
+        function showProgress(statusText) {
+            downloadActions.classList.add('hidden');
+            downloadProgress.classList.remove('hidden');
+            downloadStatusText.innerText = statusText;
+            downloadProgressBar.style.width = '100%';
+            downloadPercentage.innerText = '';
+        }
+
+        // Helper to convert images instantly to keep the mobile Share Menu happy
+        function dataURLtoFile(dataurl, filename) {
+            let arr = dataurl.split(','),
+                mime = arr[0].match(/:(.*?);/)[1],
+                bstr = atob(arr[1]),
+                n = bstr.length,
+                u8arr = new Uint8Array(n);
+            while(n--){
+                u8arr[n] = bstr.charCodeAt(n);
+            }
+            return new File([u8arr], filename, {type:mime});
         }
 
         document.getElementById('btn-cancel-download').addEventListener('click', closeDownloadModal);
 
         // Option 1: Save as File (Standard Direct Download)
-        document.getElementById('btn-save-file').addEventListener('click', async () => {
+        document.getElementById('btn-save-file').addEventListener('click', () => {
             if (!currentDownloadItem) return;
             
-            await simulateProgress('Saving to files...');
+            showProgress('Saving to files...');
             
-            const a = document.createElement('a');
-            a.href = currentDownloadItem.downloadUrl;
-            a.download = currentDownloadItem.filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            closeDownloadModal();
+            setTimeout(() => {
+                const a = document.createElement('a');
+                a.href = currentDownloadItem.downloadUrl;
+                a.download = currentDownloadItem.filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                closeDownloadModal();
+            }, 100);
         });
 
         // Option 2: Save to Photos (Web Share API - with improved iOS/Android fallbacks)
         document.getElementById('btn-save-photos').addEventListener('click', async () => {
             if (!currentDownloadItem) return;
             
-            await simulateProgress('Preparing for Photos...');
-            
             try {
                 let fileToShare;
                 if (currentDownloadItem.isPhoto) {
-                    // Force strictly image/jpeg for Photos app compatibility
-                    const res = await fetch(currentDownloadItem.data);
-                    const blob = await res.blob();
-                    fileToShare = new File([blob], currentDownloadItem.filename, { type: 'image/jpeg' });
+                    // Fast, instant conversion prevents iOS from blocking the Share Menu
+                    fileToShare = dataURLtoFile(currentDownloadItem.data, currentDownloadItem.filename);
                 } else {
-                    // Force video/mp4 if possible for iOS compatibility
                     const mimeType = currentDownloadItem.data.type || 'video/mp4';
                     fileToShare = new File([currentDownloadItem.data], currentDownloadItem.filename, { type: mimeType });
+                    
+                    // Warn iOS users if their specific browser forced a WebM recording anyway
+                    if (mimeType.includes('webm') && /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                        alert("Note: Your browser forced this recording to be a WebM file. Apple's Photos app hides the 'Save Video' button for this format. If it is missing, please use 'Save as File' instead.");
+                    }
                 }
 
                 if (navigator.canShare && navigator.canShare({ files: [fileToShare] })) {
+                    showProgress('Opening Share Menu...');
                     await navigator.share({
                         files: [fileToShare],
                         title: 'OptiPix Media',
                     });
+                    closeDownloadModal();
                 } else if (currentDownloadItem.isPhoto) {
                     // Bulletproof fallback for photos on mobile: Tell them to long press
                     const w = window.open('');
@@ -840,9 +841,16 @@
             const combinedStream = new MediaStream(tracksToCombine);
             
             try {
-                const options = MediaRecorder.isTypeSupported('video/webm') 
-                                ? { mimeType: 'video/webm' } 
-                                : { mimeType: 'video/mp4' };
+                // Heavily prefer MP4 for maximum mobile Photos app compatibility, fallback to webm
+                let options = {};
+                if (MediaRecorder.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')) {
+                    options = { mimeType: 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"' };
+                } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+                    options = { mimeType: 'video/mp4' };
+                } else if (MediaRecorder.isTypeSupported('video/webm')) {
+                    options = { mimeType: 'video/webm' };
+                }
+                
                 mediaRecorder = new MediaRecorder(combinedStream, options);
             } catch (e) {
                 console.error("MediaRecorder init failed", e);
