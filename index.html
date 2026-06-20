@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>2008 Cloud Cam</title>
+    <title>Unlimited Retro Cam</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -311,7 +311,7 @@
     <!-- Storage Gallery View -->
     <div id="gallery-container">
         <div class="gallery-header">
-            <h2 class="text-xl font-bold">CLOUD CARD</h2>
+            <h2 class="text-xl font-bold">LOCAL SD</h2>
             <button id="btn-close-gallery" class="control-btn" style="padding: 8px 15px;">BACK</button>
         </div>
         <div class="gallery-grid" id="gallery-grid">
@@ -334,111 +334,105 @@
     <!-- Boot Screen -->
     <div id="start-screen">
         <h1 class="text-3xl font-bold mb-2 text-center text-white">Media Recorder</h1>
-        <p class="text-sm mb-4 text-center text-gray-400">Cloud Persistence Active</p>
-        <p class="text-xs mb-8 text-center text-gray-500">Video Limit: 30s</p>
+        <p class="text-sm mb-4 text-center text-gray-400">Unlimited Recording Active</p>
+        <p class="text-xs mb-8 text-center text-gray-500">Saves locally to device storage</p>
         <button id="start-btn" class="launch-btn">Power On</button>
         <div id="error-msg"></div>
     </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
+    <script>
         // ==========================================
-        // FIREBASE SETUP & AUTHENTICATION
+        // INDEXED-DB LOCAL STORAGE SETUP (Unlimited limits)
         // ==========================================
-        let firebaseConfig = {};
-        try {
-            firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        } catch (e) {
-            console.error("Firebase config missing or invalid.");
-        }
+        let db;
+        const storageGallery = []; 
         
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        let currentUser = null;
-        const storageGallery = []; // Holds items synced from cloud
-
-        const initAuth = async () => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (err) {
-                console.error("Auth error:", err);
+        // Open local database
+        const request = indexedDB.open('RetroCamDB', 1);
+        
+        request.onupgradeneeded = (event) => {
+            db = event.target.result;
+            if (!db.objectStoreNames.contains('gallery')) {
+                db.createObjectStore('gallery', { keyPath: 'id' });
             }
         };
 
-        initAuth();
+        request.onsuccess = (event) => {
+            db = event.target.result;
+            loadGalleryFromDB(); // Load saved files immediately on app start
+        };
 
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            if (user) {
-                loadGalleryFromCloud();
-            }
-        });
+        request.onerror = (event) => {
+            console.error("Database error: ", event.target.errorCode);
+        };
 
-        function loadGalleryFromCloud() {
-            if (!currentUser) return;
-            const colRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'gallery');
-            
-            // Listen for real-time updates from the cloud
-            onSnapshot(colRef, (snapshot) => {
-                storageGallery.length = 0; // Clear local array
-                snapshot.forEach(doc => {
-                    storageGallery.push(doc.data());
+        function loadGalleryFromDB() {
+            if (!db) return;
+            const transaction = db.transaction(['gallery'], 'readonly');
+            const store = transaction.objectStore('gallery');
+            const getAllRequest = store.getAll();
+
+            getAllRequest.onsuccess = () => {
+                // Clean up old object URLs from memory to prevent leaks
+                storageGallery.forEach(item => {
+                    if (item.url) URL.revokeObjectURL(item.url);
                 });
-                // Sort by timestamp descending (newest first)
-                storageGallery.sort((a, b) => b.timestamp - a.timestamp);
-                renderGallery();
-            }, (error) => {
-                console.error("Gallery sync error:", error);
-            });
-        }
-
-        async function saveToCloud(blob, type) {
-            if (!currentUser) {
-                showToast("NOT LOGGED IN");
-                return;
-            }
-            
-            showToast("UPLOADING...");
-
-            // Convert raw Blob to Base64 to save in Firestore
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = async () => {
-                const base64data = reader.result;
-                const itemId = Date.now().toString();
+                storageGallery.length = 0; 
                 
-                const item = {
-                    id: itemId,
-                    type: type,
-                    url: base64data,
-                    ext: type === 'image' ? 'jpg' : 'webm',
-                    timestamp: Date.now()
-                };
-
-                try {
-                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'gallery', itemId);
-                    await setDoc(docRef, item);
-                    showToast("SAVED TO CLOUD");
-                } catch(e) {
-                    console.error("Save failed:", e);
-                    if (e.message && e.message.includes("exceeds the maximum")) {
-                        showToast("ERROR: FILE TOO LARGE");
-                    } else {
-                        showToast("UPLOAD FAILED");
-                    }
-                }
+                const items = getAllRequest.result;
+                // Sort by newest first
+                items.sort((a, b) => b.timestamp - a.timestamp);
+                
+                items.forEach(item => {
+                    // Create secure local URLs from the saved blobs
+                    const localUrl = URL.createObjectURL(item.blob);
+                    storageGallery.push({ ...item, url: localUrl });
+                });
+                renderGallery();
             };
         }
 
+        function saveToDB(blob, type) {
+            if (!db) {
+                showToast("STORAGE ERROR");
+                return;
+            }
+
+            const item = {
+                id: Date.now().toString(),
+                type: type,
+                blob: blob, // Store the raw blob directly (no 1MB limit!)
+                ext: type === 'image' ? 'jpg' : 'webm',
+                timestamp: Date.now()
+            };
+
+            const transaction = db.transaction(['gallery'], 'readwrite');
+            const store = transaction.objectStore('gallery');
+            store.add(item);
+
+            transaction.oncomplete = () => {
+                showToast("SAVED TO DEVICE");
+                loadGalleryFromDB(); // Reload to show the new item
+            };
+
+            transaction.onerror = () => {
+                showToast("FAILED TO SAVE (STORAGE FULL?)");
+            };
+        }
+
+        function deleteFromDB(id) {
+            const transaction = db.transaction(['gallery'], 'readwrite');
+            const store = transaction.objectStore('gallery');
+            store.delete(id);
+
+            transaction.oncomplete = () => {
+                showToast("FILE DELETED");
+                viewerContent.innerHTML = '';
+                mediaViewer.style.display = 'none';
+                currentViewingItem = null;
+                loadGalleryFromDB(); // Reload gallery
+            };
+        }
 
         // ==========================================
         // CAMERA DOM & ENGINE LOGIC
@@ -488,7 +482,6 @@
         let isRecording = false;
         let recordingTimerInterval;
         let recordingTime = 0;
-        const MAX_RECORDING_TIME = 30; // Max 30 seconds to prevent Cloud Size limits
 
         function updateTimerDisplay() {
             const hrs = String(Math.floor(recordingTime / 3600)).padStart(2, '0');
@@ -538,7 +531,7 @@
                         requestAnimationFrame(renderLoop);
                     };
                 } catch(err2) {
-                    errorMsg.innerText = "CAMERA ACCESS DENIED. PLEASE ALLOW CAMERA TO USE APP.";
+                    errorMsg.innerText = "CAMERA ACCESS DENIED.\nCheck browser permissions and try again.";
                     errorMsg.style.display = 'block';
                     startBtn.innerText = "Try Again";
                 }
@@ -546,7 +539,7 @@
         });
 
         // ----------------------------------------------------
-        // RECORDING LOGIC
+        // RECORDING LOGIC (Unlimited)
         // ----------------------------------------------------
         photoBtn.addEventListener('click', () => {
             if (isRecording) return; 
@@ -555,8 +548,8 @@
             setTimeout(() => flash.style.opacity = 0, 150);
 
             displayCanvas.toBlob((blob) => {
-                saveToCloud(blob, 'image');
-            }, 'image/jpeg', 0.7); 
+                saveToDB(blob, 'image');
+            }, 'image/jpeg', 0.8); 
         });
 
         videoBtn.addEventListener('click', () => {
@@ -568,10 +561,9 @@
             recordedChunks = [];
             const stream = displayCanvas.captureStream(TARGET_FPS);
             
-            // Constrain video bitrate to keep cloud sizes small
-            let options = { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 150000 };
+            let options = { mimeType: 'video/webm;codecs=vp9' };
             if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                options = { mimeType: 'video/webm', videoBitsPerSecond: 150000 };
+                options = { mimeType: 'video/webm' };
             }
 
             try { mediaRecorder = new MediaRecorder(stream, options); } 
@@ -581,7 +573,7 @@
 
             mediaRecorder.onstop = () => {
                 const blob = new Blob(recordedChunks, { type: options.mimeType });
-                saveToCloud(blob, 'video');
+                saveToDB(blob, 'video'); // Saves massive blobs straight to IndexedDB without crashing
             };
 
             mediaRecorder.start();
@@ -599,12 +591,7 @@
             recordingTimerInterval = setInterval(() => {
                 recordingTime++;
                 updateTimerDisplay();
-                
-                // Force stop at 30 seconds to prevent 1MB Firestore limit crash
-                if (recordingTime >= MAX_RECORDING_TIME) {
-                    stopRecording();
-                    showToast("MAX VIDEO LENGTH REACHED (30s)");
-                }
+                // Removed the 30s limit completely!
             }, 1000);
         }
 
@@ -690,19 +677,9 @@
             document.body.removeChild(a);
         });
 
-        viewerDeleteBtn.addEventListener('click', async () => {
-            if (!currentViewingItem || !currentUser) return;
-            showToast("DELETING...");
-            try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'gallery', currentViewingItem.id));
-                viewerContent.innerHTML = '';
-                mediaViewer.style.display = 'none';
-                currentViewingItem = null;
-                showToast("FILE DELETED");
-            } catch (e) {
-                console.error(e);
-                showToast("FAILED TO DELETE");
-            }
+        viewerDeleteBtn.addEventListener('click', () => {
+            if (!currentViewingItem) return;
+            deleteFromDB(currentViewingItem.id);
         });
 
         // ----------------------------------------------------
