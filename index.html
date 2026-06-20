@@ -392,7 +392,8 @@
             };
         }
 
-        function saveToDB(blob, type) {
+        // Updated save function allows passing the correct extension (MP4 vs WEBM)
+        function saveToDB(blob, type, ext) {
             if (!db) {
                 showToast("STORAGE ERROR");
                 return;
@@ -401,8 +402,8 @@
             const item = {
                 id: Date.now().toString(),
                 type: type,
-                blob: blob, // Store the raw blob directly (no 1MB limit!)
-                ext: type === 'image' ? 'jpg' : 'webm',
+                blob: blob, // Store the raw blob directly
+                ext: ext || (type === 'image' ? 'jpg' : 'webm'),
                 timestamp: Date.now()
             };
 
@@ -482,6 +483,7 @@
         let isRecording = false;
         let recordingTimerInterval;
         let recordingTime = 0;
+        let currentVideoExt = 'webm'; // Track extension dynamically
 
         function updateTimerDisplay() {
             const hrs = String(Math.floor(recordingTime / 3600)).padStart(2, '0');
@@ -548,7 +550,7 @@
             setTimeout(() => flash.style.opacity = 0, 150);
 
             displayCanvas.toBlob((blob) => {
-                saveToDB(blob, 'image');
+                saveToDB(blob, 'image', 'jpg');
             }, 'image/jpeg', 0.8); 
         });
 
@@ -561,9 +563,20 @@
             recordedChunks = [];
             const stream = displayCanvas.captureStream(TARGET_FPS);
             
-            let options = { mimeType: 'video/webm;codecs=vp9' };
-            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            // Prioritize MP4 format (CRITICAL FOR iOS/IPHONE DOWNLOADING)
+            let options;
+            if (MediaRecorder.isTypeSupported('video/mp4')) {
+                options = { mimeType: 'video/mp4' };
+                currentVideoExt = 'mp4';
+            } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+                options = { mimeType: 'video/webm;codecs=vp9' };
+                currentVideoExt = 'webm';
+            } else if (MediaRecorder.isTypeSupported('video/webm')) {
                 options = { mimeType: 'video/webm' };
+                currentVideoExt = 'webm';
+            } else {
+                options = { mimeType: '' }; // Let browser fallback
+                currentVideoExt = 'mp4'; 
             }
 
             try { mediaRecorder = new MediaRecorder(stream, options); } 
@@ -572,8 +585,8 @@
             mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
 
             mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: options.mimeType });
-                saveToDB(blob, 'video'); // Saves massive blobs straight to IndexedDB without crashing
+                const blob = new Blob(recordedChunks, { type: options.mimeType || 'video/mp4' });
+                saveToDB(blob, 'video', currentVideoExt); 
             };
 
             mediaRecorder.start();
@@ -591,7 +604,6 @@
             recordingTimerInterval = setInterval(() => {
                 recordingTime++;
                 updateTimerDisplay();
-                // Removed the 30s limit completely!
             }, 1000);
         }
 
@@ -663,18 +675,40 @@
             currentViewingItem = null;
         });
 
-        viewerDownloadBtn.addEventListener('click', () => {
+        // ==========================================
+        // DOWNLOAD FIX FOR MOBILE & DESKTOP
+        // ==========================================
+        viewerDownloadBtn.addEventListener('click', async () => {
             if (!currentViewingItem) return;
+            
+            const prefix = currentViewingItem.type === 'image' ? 'IMG' : 'VID';
+            const filename = `${prefix}_${currentViewingItem.id}.${currentViewingItem.ext}`;
+            
+            // Try Native Device Share API first (Best for saving to Camera Roll on iOS/Android)
+            if (navigator.share && navigator.canShare) {
+                try {
+                    const file = new File([currentViewingItem.blob], filename, { type: currentViewingItem.blob.type });
+                    if (navigator.canShare({ files: [file] })) {
+                        await navigator.share({
+                            files: [file],
+                            title: filename
+                        });
+                        return; // Successfully opened the native save/share sheet!
+                    }
+                } catch (err) {
+                    console.log("Share API cancelled or failed, falling back to download link...");
+                }
+            }
+
+            // Fallback for Desktop Browsers (Silent Download)
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = currentViewingItem.url;
-            
-            const prefix = currentViewingItem.type === 'image' ? 'IMG' : 'VID';
-            a.download = `${prefix}_${currentViewingItem.id}.${currentViewingItem.ext}`;
-            
+            a.download = filename;
+            a.target = '_blank'; // Required for some browsers if download attribute is ignored
             document.body.appendChild(a);
             a.click();
-            document.body.removeChild(a);
+            setTimeout(() => document.body.removeChild(a), 100);
         });
 
         viewerDeleteBtn.addEventListener('click', () => {
