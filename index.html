@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>2006 Retro Cam Recorder</title>
+    <title>2008 Smooth Cam & Storage</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -15,17 +15,20 @@
             color: #fff;
             font-family: 'Courier New', Courier, monospace;
             user-select: none;
-            touch-action: none; /* Prevents pull-to-refresh on mobile */
+            touch-action: none;
         }
 
         #camera-container {
-            position: relative;
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100vw;
             height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             background-color: #000;
+            z-index: 10;
         }
 
         #display {
@@ -34,7 +37,6 @@
             object-fit: cover;
         }
 
-        /* Screen flash effect for taking photos */
         #flash {
             position: absolute;
             top: 0;
@@ -46,6 +48,23 @@
             pointer-events: none;
             z-index: 30;
             transition: opacity 0.1s ease-out;
+        }
+
+        /* Toast Notification */
+        #toast {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #fff;
+            padding: 10px 20px;
+            border-radius: 4px;
+            z-index: 40;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            font-weight: bold;
         }
 
         /* UI Overlay */
@@ -76,7 +95,7 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            visibility: hidden; /* Hidden until recording starts */
+            visibility: hidden;
         }
 
         .red-dot {
@@ -93,24 +112,23 @@
             50%, 100% { opacity: 0; }
         }
 
-        /* Controls */
         .ui-bottom {
             display: flex;
-            justify-content: space-around;
+            justify-content: space-between;
             align-items: center;
-            padding-bottom: 20px;
-            pointer-events: auto; /* Allow clicking buttons */
+            padding-bottom: 10px;
+            pointer-events: auto;
         }
 
         .control-btn {
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.5);
             border: 2px solid #fff;
             color: #fff;
-            padding: 15px 25px;
+            padding: 12px 18px;
             border-radius: 8px;
             font-family: inherit;
             font-weight: bold;
-            font-size: 1rem;
+            font-size: 0.9rem;
             backdrop-filter: blur(4px);
             cursor: pointer;
             text-shadow: 1px 1px 0 #000;
@@ -125,6 +143,101 @@
         .record-btn-active {
             background: rgba(255, 0, 0, 0.4);
             border-color: #ff4444;
+            color: #ff4444;
+        }
+
+        /* Storage Gallery UI */
+        #gallery-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #111;
+            z-index: 50;
+            display: none;
+            flex-direction: column;
+        }
+
+        .gallery-header {
+            padding: 20px;
+            background: #222;
+            border-bottom: 2px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .gallery-grid {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 10px;
+            align-content: start;
+        }
+
+        .gallery-item {
+            aspect-ratio: 3/4;
+            background: #333;
+            border: 2px solid #555;
+            border-radius: 4px;
+            position: relative;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .gallery-item img, .gallery-item video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .item-icon {
+            position: absolute;
+            bottom: 5px;
+            right: 5px;
+            background: rgba(0,0,0,0.7);
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 0.7rem;
+        }
+
+        /* Media Viewer UI */
+        #media-viewer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+            z-index: 60;
+            display: none;
+            flex-direction: column;
+        }
+
+        #viewer-content {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        #viewer-content img, #viewer-content video {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .viewer-controls {
+            padding: 20px;
+            background: #111;
+            display: flex;
+            justify-content: space-between;
+            border-top: 1px solid #333;
         }
 
         /* Start Screen */
@@ -139,7 +252,7 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            z-index: 50;
+            z-index: 100;
         }
 
         .launch-btn {
@@ -154,22 +267,17 @@
             margin-top: 20px;
         }
 
-        #error-msg {
-            color: #ff4444;
-            margin-top: 20px;
-            max-width: 80%;
-            text-align: center;
-        }
-
     </style>
 </head>
 <body>
 
     <video id="webcam" autoplay playsinline style="display: none;"></video>
 
+    <!-- Camera View -->
     <div id="camera-container">
         <canvas id="display"></canvas>
         <div id="flash"></div>
+        <div id="toast">SAVED TO STORAGE</div>
         
         <div class="ui-layer" id="ui-layer">
             <div class="ui-top">
@@ -181,18 +289,41 @@
             </div>
             
             <div class="ui-bottom">
-                <button id="photo-btn" class="control-btn">SNAP</button>
-                <button id="video-btn" class="control-btn">VIDEO</button>
+                <button id="btn-gallery" class="control-btn">STORAGE</button>
+                <div style="display: flex; gap: 10px;">
+                    <button id="photo-btn" class="control-btn">SNAP</button>
+                    <button id="video-btn" class="control-btn">VIDEO</button>
+                </div>
             </div>
         </div>
     </div>
 
+    <!-- Storage Gallery View -->
+    <div id="gallery-container">
+        <div class="gallery-header">
+            <h2 class="text-xl font-bold">SD CARD</h2>
+            <button id="btn-close-gallery" class="control-btn" style="padding: 8px 15px;">BACK</button>
+        </div>
+        <div class="gallery-grid" id="gallery-grid">
+            <!-- Items injected here -->
+        </div>
+    </div>
+
+    <!-- Single Media Viewer -->
+    <div id="media-viewer">
+        <div id="viewer-content"></div>
+        <div class="viewer-controls">
+            <button id="btn-viewer-back" class="control-btn">BACK</button>
+            <button id="btn-viewer-download" class="control-btn" style="background: #2d8a2d; border-color: #4ade80;">DOWNLOAD</button>
+        </div>
+    </div>
+
+    <!-- Boot Screen -->
     <div id="start-screen">
         <h1 class="text-3xl font-bold mb-2 text-center text-white">Media Recorder</h1>
-        <p class="text-sm mb-8 text-center text-gray-400">Standard Quality</p>
-        
-        <button id="start-btn" class="launch-btn">Open Camera</button>
-        <div id="error-msg"></div>
+        <p class="text-sm mb-8 text-center text-gray-400">Smooth Glitch Engine Active</p>
+        <button id="start-btn" class="launch-btn">Power On</button>
+        <div id="error-msg" class="text-red-500 mt-4 hidden"></div>
     </div>
 
     <script>
@@ -202,25 +333,37 @@
         
         const startScreen = document.getElementById('start-screen');
         const startBtn = document.getElementById('start-btn');
-        const errorMsg = document.getElementById('error-msg');
         const uiLayer = document.getElementById('ui-layer');
         const timeStamp = document.getElementById('time-stamp');
         const flash = document.getElementById('flash');
+        const toast = document.getElementById('toast');
         const recIndicator = document.getElementById('rec-indicator');
         
         const photoBtn = document.getElementById('photo-btn');
         const videoBtn = document.getElementById('video-btn');
+        const galleryBtn = document.getElementById('btn-gallery');
 
-        // Capture Settings (UPGRADED CLARITY)
-        const TARGET_FPS = 15; // Slightly smoother, 15fps was common for early web/phone video
+        // Gallery Elements
+        const galleryContainer = document.getElementById('gallery-container');
+        const galleryGrid = document.getElementById('gallery-grid');
+        const closeGalleryBtn = document.getElementById('btn-close-gallery');
+        const mediaViewer = document.getElementById('media-viewer');
+        const viewerContent = document.getElementById('viewer-content');
+        const viewerBackBtn = document.getElementById('btn-viewer-back');
+        const viewerDownloadBtn = document.getElementById('btn-viewer-download');
+
+        // Session Storage Array
+        const storageGallery = []; 
+        let currentViewingItem = null;
+
+        // Capture Settings (Smoothed Out)
+        const TARGET_FPS = 24; // Increased from 15 to 24 for smoother motion
         const frameInterval = 1000 / TARGET_FPS;
         let lastFrameTime = 0;
         
-        // Internal processing resolution (Bumped to QVGA: 320x240)
-        // This is 4x as many pixels as before. It removes the chunky pixelation
-        // but keeps the soft, mushy, compressed feel when stretched to a modern screen.
-        const INTERNAL_WIDTH = 320;
-        const INTERNAL_HEIGHT = 240; 
+        // Increased resolution for smoother visuals
+        const INTERNAL_WIDTH = 480;
+        const INTERNAL_HEIGHT = 360; 
         
         const offCanvas = document.createElement('canvas');
         offCanvas.width = INTERNAL_WIDTH;
@@ -241,13 +384,18 @@
             timeStamp.innerText = `${hrs}:${mins}:${secs}`;
         }
 
-        // Handle Canvas Resize
+        function showToast(msg) {
+            toast.innerText = msg;
+            toast.style.opacity = 1;
+            setTimeout(() => toast.style.opacity = 0, 2000);
+        }
+
         function resizeCanvas() {
             displayCanvas.width = window.innerWidth;
             displayCanvas.height = window.innerHeight;
-            // Leave image smoothing ON to create the blurred/mushy look when scaled up
+            // Medium smoothing prevents harsh jagged edges while keeping it a bit soft
             ctx.imageSmoothingEnabled = true; 
-            ctx.imageSmoothingQuality = 'low'; 
+            ctx.imageSmoothingQuality = 'medium'; 
         }
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
@@ -257,23 +405,17 @@
         // ----------------------------------------------------
         startBtn.addEventListener('click', async () => {
             try {
-                errorMsg.style.display = 'none';
                 startBtn.innerText = "Loading...";
-                
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
-                    audio: false // No audio to prevent feedback/permission issues on simple web apps
+                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
                 });
-
                 video.srcObject = stream;
-                
                 video.onloadedmetadata = () => {
                     video.play();
                     startScreen.style.display = 'none';
                     uiLayer.style.display = 'flex';
                     requestAnimationFrame(renderLoop);
                 };
-
             } catch (err) {
                 try {
                      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
@@ -285,95 +427,74 @@
                         requestAnimationFrame(renderLoop);
                     };
                 } catch(err2) {
-                    errorMsg.innerText = "Camera access denied. Please allow permissions.";
-                    errorMsg.style.display = 'block';
+                    alert("Camera access denied.");
                     startBtn.innerText = "Try Again";
                 }
             }
         });
 
         // ----------------------------------------------------
-        // MEDIA CAPTURE LOGIC
+        // MEDIA CAPTURE & STORAGE
         // ----------------------------------------------------
 
-        function triggerDownload(url, filename) {
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-            }, 100);
+        function saveToStorage(blob, type) {
+            const url = URL.createObjectURL(blob);
+            const item = {
+                id: Date.now(),
+                type: type, // 'image' or 'video'
+                url: url,
+                ext: type === 'image' ? 'jpg' : 'webm'
+            };
+            storageGallery.unshift(item); // Add to beginning of array
+            showToast("SAVED TO STORAGE");
+            renderGallery();
         }
 
-        // Take Photo
         photoBtn.addEventListener('click', () => {
             if (isRecording) return; 
 
-            // Flash effect
             flash.style.opacity = 1;
             setTimeout(() => flash.style.opacity = 0, 150);
 
-            // Export current canvas as JPEG (0.7 quality leaves slight artifacting, perfect for retro)
-            const dataURL = displayCanvas.toDataURL('image/jpeg', 0.7);
-            triggerDownload(dataURL, `IMG_${Date.now()}.jpg`);
+            displayCanvas.toBlob((blob) => {
+                saveToStorage(blob, 'image');
+            }, 'image/jpeg', 0.8); // Slightly higher JPEG quality
         });
 
-        // Toggle Video Recording
         videoBtn.addEventListener('click', () => {
-            if (!isRecording) {
-                startRecording();
-            } else {
-                stopRecording();
-            }
+            if (!isRecording) startRecording();
+            else stopRecording();
         });
 
         function startRecording() {
             recordedChunks = [];
-            
             const stream = displayCanvas.captureStream(TARGET_FPS);
             
             let options = { mimeType: 'video/webm;codecs=vp9' };
             if (!MediaRecorder.isTypeSupported(options.mimeType)) {
                 options = { mimeType: 'video/webm' };
-                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                    options = { mimeType: 'video/mp4' }; 
-                }
             }
 
-            try {
-                mediaRecorder = new MediaRecorder(stream, options);
-            } catch (e) {
-                alert("Recording not supported on this browser.");
-                return;
-            }
+            try { mediaRecorder = new MediaRecorder(stream, options); } 
+            catch (e) { alert("Recording not supported."); return; }
 
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    recordedChunks.push(event.data);
-                }
-            };
+            mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
 
             mediaRecorder.onstop = () => {
                 const blob = new Blob(recordedChunks, { type: options.mimeType });
-                const url = URL.createObjectURL(blob);
-                const ext = options.mimeType.includes('mp4') ? 'mp4' : 'webm';
-                triggerDownload(url, `VID_${Date.now()}.${ext}`);
-                URL.revokeObjectURL(url);
+                saveToStorage(blob, 'video');
             };
 
             mediaRecorder.start();
             isRecording = true;
             
-            // UI Updates
             videoBtn.innerText = "STOP";
             videoBtn.classList.add('record-btn-active');
             photoBtn.style.opacity = "0.3"; 
+            galleryBtn.style.opacity = "0.3";
+            galleryBtn.style.pointerEvents = "none";
             recIndicator.style.visibility = "visible";
             
-            // Start Timer
             recordingTime = 0;
             updateTimerDisplay();
             recordingTimerInterval = setInterval(() => {
@@ -386,17 +507,88 @@
             mediaRecorder.stop();
             isRecording = false;
             
-            // UI Updates
             videoBtn.innerText = "VIDEO";
             videoBtn.classList.remove('record-btn-active');
             photoBtn.style.opacity = "1";
+            galleryBtn.style.opacity = "1";
+            galleryBtn.style.pointerEvents = "auto";
             recIndicator.style.visibility = "hidden";
-            
             clearInterval(recordingTimerInterval);
         }
 
         // ----------------------------------------------------
-        // IMAGE PROCESSING LOOP
+        // GALLERY LOGIC
+        // ----------------------------------------------------
+        
+        galleryBtn.addEventListener('click', () => {
+            galleryContainer.style.display = 'flex';
+            uiLayer.style.display = 'none';
+        });
+
+        closeGalleryBtn.addEventListener('click', () => {
+            galleryContainer.style.display = 'none';
+            uiLayer.style.display = 'flex';
+        });
+
+        function renderGallery() {
+            galleryGrid.innerHTML = '';
+            storageGallery.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'gallery-item';
+                el.onclick = () => openViewer(item);
+
+                if (item.type === 'image') {
+                    el.innerHTML = `<img src="${item.url}"><div class="item-icon">IMG</div>`;
+                } else {
+                    el.innerHTML = `<video src="${item.url}#t=0.1" preload="metadata" muted></video><div class="item-icon">VID</div>`;
+                }
+                galleryGrid.appendChild(el);
+            });
+        }
+
+        function openViewer(item) {
+            currentViewingItem = item;
+            viewerContent.innerHTML = '';
+            
+            if (item.type === 'image') {
+                const img = document.createElement('img');
+                img.src = item.url;
+                viewerContent.appendChild(img);
+            } else {
+                const vid = document.createElement('video');
+                vid.src = item.url;
+                vid.controls = true;
+                vid.autoplay = true;
+                vid.loop = true;
+                viewerContent.appendChild(vid);
+            }
+            
+            mediaViewer.style.display = 'flex';
+        }
+
+        viewerBackBtn.addEventListener('click', () => {
+            viewerContent.innerHTML = ''; // Stop video
+            mediaViewer.style.display = 'none';
+            currentViewingItem = null;
+        });
+
+        viewerDownloadBtn.addEventListener('click', () => {
+            if (!currentViewingItem) return;
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = currentViewingItem.url;
+            
+            // Format name: VID_12345.webm or IMG_12345.jpg
+            const prefix = currentViewingItem.type === 'image' ? 'IMG' : 'VID';
+            a.download = `${prefix}_${currentViewingItem.id}.${currentViewingItem.ext}`;
+            
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        });
+
+        // ----------------------------------------------------
+        // IMAGE PROCESSING LOOP & GLITCH ENGINE
         // ----------------------------------------------------
         function renderLoop(timestamp) {
             requestAnimationFrame(renderLoop);
@@ -407,7 +599,6 @@
 
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 
-                // 1. Draw raw video to processing canvas (now 320x240)
                 const videoAspect = video.videoWidth / video.videoHeight;
                 const canvasAspect = INTERNAL_WIDTH / INTERNAL_HEIGHT;
                 
@@ -426,36 +617,35 @@
 
                 offCtx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
 
-                // 2. Apply "Early Digital Video" filter
                 let imgData = offCtx.getImageData(0, 0, INTERNAL_WIDTH, INTERNAL_HEIGHT);
                 let data = imgData.data;
 
-                const contrast = 65; // Slightly reduced contrast from 75 for better clarity
+                const contrast = 55; // Lowered contrast slightly for smoother transitions
                 const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-                const saturation = 0.40; // Slightly more color
+                const saturation = 0.85; 
 
                 for (let i = 0; i < data.length; i += 4) {
                     let r = data[i];
                     let g = data[i + 1];
                     let b = data[i + 2];
 
-                    // Contrast Step
+                    // Contrast
                     r = contrastFactor * (r - 128) + 128;
                     g = contrastFactor * (g - 128) + 128;
                     b = contrastFactor * (b - 128) + 128;
 
                     let luma = 0.299 * r + 0.587 * g + 0.114 * b;
 
-                    // Highlight Blooming & Shadow Crushing (Slightly relaxed)
-                    if (luma > 170) {
-                        const over = (luma - 170) * 1.5; // Blooms slightly later and softer
+                    // Crushing (Smoothed out the intensity of the pure blacks and whites)
+                    if (luma > 180) {
+                        const over = (luma - 180) * 1.2; 
                         r += over; g += over; b += over;
-                    } else if (luma < 80) {
-                        const under = (80 - luma) * 1.2; // Crushes darks less aggressively 
+                    } else if (luma < 70) {
+                        const under = (70 - luma) * 1.1; 
                         r -= under; g -= under; b -= under;
                     }
 
-                    // Desaturation
+                    // Saturation
                     let newLuma = 0.299 * r + 0.587 * g + 0.114 * b;
                     r = newLuma + saturation * (r - newLuma);
                     g = newLuma + saturation * (g - newLuma);
@@ -465,10 +655,53 @@
                     data[i + 1] = Math.min(255, Math.max(0, g));
                     data[i + 2] = Math.min(255, Math.max(0, b));
                 }
+
+                // ==========================================
+                // GLITCH ENGINE (Only triggers during video recording)
+                // ==========================================
+                if (isRecording && Math.random() < 0.15) { // Slightly lower glitch chance due to higher FPS
+                    
+                    // Horizontal Tearing
+                    if (Math.random() > 0.3) {
+                        const startY = Math.floor(Math.random() * INTERNAL_HEIGHT);
+                        const sliceHeight = Math.floor(Math.random() * 25) + 5; 
+                        const shiftX = Math.floor((Math.random() - 0.5) * 40); 
+                        
+                        for (let y = startY; y < startY + sliceHeight && y < INTERNAL_HEIGHT; y++) {
+                            for (let x = 0; x < INTERNAL_WIDTH; x++) {
+                                let targetX = x + shiftX;
+                                if (targetX >= 0 && targetX < INTERNAL_WIDTH) {
+                                    let srcIdx = (y * INTERNAL_WIDTH + x) * 4;
+                                    let dstIdx = (y * INTERNAL_WIDTH + targetX) * 4;
+                                    data[dstIdx] = data[srcIdx];     // R
+                                    data[dstIdx+1] = data[srcIdx+1]; // G
+                                    data[dstIdx+2] = data[srcIdx+2]; // B
+                                }
+                            }
+                        }
+                    }
+
+                    // Color Block Corruption
+                    if (Math.random() > 0.7) {
+                        const blockX = Math.floor(Math.random() * INTERNAL_WIDTH);
+                        const blockY = Math.floor(Math.random() * INTERNAL_HEIGHT);
+                        const blockSize = Math.floor(Math.random() * 50) + 15;
+                        const corruptR = Math.random() > 0.5 ? 255 : 0;
+                        const corruptG = Math.random() > 0.5 ? 255 : 0;
+
+                        for (let y = blockY; y < blockY + blockSize && y < INTERNAL_HEIGHT; y+=2) {
+                            for (let x = blockX; x < blockX + blockSize && x < INTERNAL_WIDTH; x+=2) {
+                                let idx = (y * INTERNAL_WIDTH + x) * 4;
+                                data[idx] = corruptR; 
+                                data[idx+1] = corruptG; 
+                            }
+                        }
+                    }
+                }
                 
                 offCtx.putImageData(imgData, 0, 0);
 
-                // 3. Draw to main screen WITH SMOOTHING ON
+                // Draw to main screen
                 const displayAspect = displayCanvas.width / displayCanvas.height;
                 let finalWidth = displayCanvas.width;
                 let finalHeight = displayCanvas.height;
