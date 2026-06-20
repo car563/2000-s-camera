@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>2008 Smooth Cam & Storage</title>
+    <title>2008 Cloud Cam</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -60,11 +60,12 @@
             border: 1px solid #fff;
             padding: 10px 20px;
             border-radius: 4px;
-            z-index: 40;
+            z-index: 100;
             opacity: 0;
             transition: opacity 0.3s;
             pointer-events: none;
             font-weight: bold;
+            text-align: center;
         }
 
         /* UI Overlay */
@@ -238,6 +239,7 @@
             display: flex;
             justify-content: space-between;
             border-top: 1px solid #333;
+            gap: 10px;
         }
 
         /* Start Screen */
@@ -267,6 +269,14 @@
             margin-top: 20px;
         }
 
+        #error-msg {
+            color: #ff4444;
+            margin-top: 20px;
+            max-width: 80%;
+            text-align: center;
+            display: none;
+        }
+
     </style>
 </head>
 <body>
@@ -277,7 +287,7 @@
     <div id="camera-container">
         <canvas id="display"></canvas>
         <div id="flash"></div>
-        <div id="toast">SAVED TO STORAGE</div>
+        <div id="toast">SYSTEM MESSAGE</div>
         
         <div class="ui-layer" id="ui-layer">
             <div class="ui-top">
@@ -301,7 +311,7 @@
     <!-- Storage Gallery View -->
     <div id="gallery-container">
         <div class="gallery-header">
-            <h2 class="text-xl font-bold">SD CARD</h2>
+            <h2 class="text-xl font-bold">CLOUD CARD</h2>
             <button id="btn-close-gallery" class="control-btn" style="padding: 8px 15px;">BACK</button>
         </div>
         <div class="gallery-grid" id="gallery-grid">
@@ -314,25 +324,132 @@
         <div id="viewer-content"></div>
         <div class="viewer-controls">
             <button id="btn-viewer-back" class="control-btn">BACK</button>
-            <button id="btn-viewer-download" class="control-btn" style="background: #2d8a2d; border-color: #4ade80;">DOWNLOAD</button>
+            <div style="display: flex; gap: 10px;">
+                <button id="btn-viewer-delete" class="control-btn" style="background: #8a2d2d; border-color: #de4a4a;">DELETE</button>
+                <button id="btn-viewer-download" class="control-btn" style="background: #2d8a2d; border-color: #4ade80;">DOWNLOAD</button>
+            </div>
         </div>
     </div>
 
     <!-- Boot Screen -->
     <div id="start-screen">
         <h1 class="text-3xl font-bold mb-2 text-center text-white">Media Recorder</h1>
-        <p class="text-sm mb-8 text-center text-gray-400">Smooth Glitch Engine Active</p>
+        <p class="text-sm mb-4 text-center text-gray-400">Cloud Persistence Active</p>
+        <p class="text-xs mb-8 text-center text-gray-500">Video Limit: 30s</p>
         <button id="start-btn" class="launch-btn">Power On</button>
-        <div id="error-msg" class="text-red-500 mt-4 hidden"></div>
+        <div id="error-msg"></div>
     </div>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // FIREBASE SETUP & AUTHENTICATION
+        // ==========================================
+        let firebaseConfig = {};
+        try {
+            firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        } catch (e) {
+            console.error("Firebase config missing or invalid.");
+        }
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        let currentUser = null;
+        const storageGallery = []; // Holds items synced from cloud
+
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Auth error:", err);
+            }
+        };
+
+        initAuth();
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                loadGalleryFromCloud();
+            }
+        });
+
+        function loadGalleryFromCloud() {
+            if (!currentUser) return;
+            const colRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'gallery');
+            
+            // Listen for real-time updates from the cloud
+            onSnapshot(colRef, (snapshot) => {
+                storageGallery.length = 0; // Clear local array
+                snapshot.forEach(doc => {
+                    storageGallery.push(doc.data());
+                });
+                // Sort by timestamp descending (newest first)
+                storageGallery.sort((a, b) => b.timestamp - a.timestamp);
+                renderGallery();
+            }, (error) => {
+                console.error("Gallery sync error:", error);
+            });
+        }
+
+        async function saveToCloud(blob, type) {
+            if (!currentUser) {
+                showToast("NOT LOGGED IN");
+                return;
+            }
+            
+            showToast("UPLOADING...");
+
+            // Convert raw Blob to Base64 to save in Firestore
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = async () => {
+                const base64data = reader.result;
+                const itemId = Date.now().toString();
+                
+                const item = {
+                    id: itemId,
+                    type: type,
+                    url: base64data,
+                    ext: type === 'image' ? 'jpg' : 'webm',
+                    timestamp: Date.now()
+                };
+
+                try {
+                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'gallery', itemId);
+                    await setDoc(docRef, item);
+                    showToast("SAVED TO CLOUD");
+                } catch(e) {
+                    console.error("Save failed:", e);
+                    if (e.message && e.message.includes("exceeds the maximum")) {
+                        showToast("ERROR: FILE TOO LARGE");
+                    } else {
+                        showToast("UPLOAD FAILED");
+                    }
+                }
+            };
+        }
+
+
+        // ==========================================
+        // CAMERA DOM & ENGINE LOGIC
+        // ==========================================
         const video = document.getElementById('webcam');
         const displayCanvas = document.getElementById('display');
         const ctx = displayCanvas.getContext('2d', { alpha: false });
         
         const startScreen = document.getElementById('start-screen');
         const startBtn = document.getElementById('start-btn');
+        const errorMsg = document.getElementById('error-msg');
         const uiLayer = document.getElementById('ui-layer');
         const timeStamp = document.getElementById('time-stamp');
         const flash = document.getElementById('flash');
@@ -343,7 +460,6 @@
         const videoBtn = document.getElementById('video-btn');
         const galleryBtn = document.getElementById('btn-gallery');
 
-        // Gallery Elements
         const galleryContainer = document.getElementById('gallery-container');
         const galleryGrid = document.getElementById('gallery-grid');
         const closeGalleryBtn = document.getElementById('btn-close-gallery');
@@ -351,17 +467,14 @@
         const viewerContent = document.getElementById('viewer-content');
         const viewerBackBtn = document.getElementById('btn-viewer-back');
         const viewerDownloadBtn = document.getElementById('btn-viewer-download');
+        const viewerDeleteBtn = document.getElementById('btn-viewer-delete');
 
-        // Session Storage Array
-        const storageGallery = []; 
         let currentViewingItem = null;
 
-        // Capture Settings (Smoothed Out)
-        const TARGET_FPS = 24; // Increased from 15 to 24 for smoother motion
+        const TARGET_FPS = 24; 
         const frameInterval = 1000 / TARGET_FPS;
         let lastFrameTime = 0;
         
-        // Increased resolution for smoother visuals
         const INTERNAL_WIDTH = 480;
         const INTERNAL_HEIGHT = 360; 
         
@@ -370,12 +483,12 @@
         offCanvas.height = INTERNAL_HEIGHT;
         const offCtx = offCanvas.getContext('2d', { alpha: false });
 
-        // Recording State
         let mediaRecorder;
         let recordedChunks = [];
         let isRecording = false;
         let recordingTimerInterval;
         let recordingTime = 0;
+        const MAX_RECORDING_TIME = 30; // Max 30 seconds to prevent Cloud Size limits
 
         function updateTimerDisplay() {
             const hrs = String(Math.floor(recordingTime / 3600)).padStart(2, '0');
@@ -384,25 +497,23 @@
             timeStamp.innerText = `${hrs}:${mins}:${secs}`;
         }
 
+        let toastTimeout;
         function showToast(msg) {
+            clearTimeout(toastTimeout);
             toast.innerText = msg;
             toast.style.opacity = 1;
-            setTimeout(() => toast.style.opacity = 0, 2000);
+            toastTimeout = setTimeout(() => toast.style.opacity = 0, 2000);
         }
 
         function resizeCanvas() {
             displayCanvas.width = window.innerWidth;
             displayCanvas.height = window.innerHeight;
-            // Medium smoothing prevents harsh jagged edges while keeping it a bit soft
             ctx.imageSmoothingEnabled = true; 
             ctx.imageSmoothingQuality = 'medium'; 
         }
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        // ----------------------------------------------------
-        // INITIALIZATION
-        // ----------------------------------------------------
         startBtn.addEventListener('click', async () => {
             try {
                 startBtn.innerText = "Loading...";
@@ -427,29 +538,16 @@
                         requestAnimationFrame(renderLoop);
                     };
                 } catch(err2) {
-                    alert("Camera access denied.");
+                    errorMsg.innerText = "CAMERA ACCESS DENIED. PLEASE ALLOW CAMERA TO USE APP.";
+                    errorMsg.style.display = 'block';
                     startBtn.innerText = "Try Again";
                 }
             }
         });
 
         // ----------------------------------------------------
-        // MEDIA CAPTURE & STORAGE
+        // RECORDING LOGIC
         // ----------------------------------------------------
-
-        function saveToStorage(blob, type) {
-            const url = URL.createObjectURL(blob);
-            const item = {
-                id: Date.now(),
-                type: type, // 'image' or 'video'
-                url: url,
-                ext: type === 'image' ? 'jpg' : 'webm'
-            };
-            storageGallery.unshift(item); // Add to beginning of array
-            showToast("SAVED TO STORAGE");
-            renderGallery();
-        }
-
         photoBtn.addEventListener('click', () => {
             if (isRecording) return; 
 
@@ -457,8 +555,8 @@
             setTimeout(() => flash.style.opacity = 0, 150);
 
             displayCanvas.toBlob((blob) => {
-                saveToStorage(blob, 'image');
-            }, 'image/jpeg', 0.8); // Slightly higher JPEG quality
+                saveToCloud(blob, 'image');
+            }, 'image/jpeg', 0.7); 
         });
 
         videoBtn.addEventListener('click', () => {
@@ -470,19 +568,20 @@
             recordedChunks = [];
             const stream = displayCanvas.captureStream(TARGET_FPS);
             
-            let options = { mimeType: 'video/webm;codecs=vp9' };
+            // Constrain video bitrate to keep cloud sizes small
+            let options = { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 150000 };
             if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                options = { mimeType: 'video/webm' };
+                options = { mimeType: 'video/webm', videoBitsPerSecond: 150000 };
             }
 
             try { mediaRecorder = new MediaRecorder(stream, options); } 
-            catch (e) { alert("Recording not supported."); return; }
+            catch (e) { showToast("RECORDING NOT SUPPORTED"); return; }
 
             mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
 
             mediaRecorder.onstop = () => {
                 const blob = new Blob(recordedChunks, { type: options.mimeType });
-                saveToStorage(blob, 'video');
+                saveToCloud(blob, 'video');
             };
 
             mediaRecorder.start();
@@ -500,6 +599,12 @@
             recordingTimerInterval = setInterval(() => {
                 recordingTime++;
                 updateTimerDisplay();
+                
+                // Force stop at 30 seconds to prevent 1MB Firestore limit crash
+                if (recordingTime >= MAX_RECORDING_TIME) {
+                    stopRecording();
+                    showToast("MAX VIDEO LENGTH REACHED (30s)");
+                }
             }, 1000);
         }
 
@@ -517,9 +622,8 @@
         }
 
         // ----------------------------------------------------
-        // GALLERY LOGIC
+        // GALLERY & VIEWER UI
         // ----------------------------------------------------
-        
         galleryBtn.addEventListener('click', () => {
             galleryContainer.style.display = 'flex';
             uiLayer.style.display = 'none';
@@ -567,7 +671,7 @@
         }
 
         viewerBackBtn.addEventListener('click', () => {
-            viewerContent.innerHTML = ''; // Stop video
+            viewerContent.innerHTML = ''; // Stop video execution
             mediaViewer.style.display = 'none';
             currentViewingItem = null;
         });
@@ -578,7 +682,6 @@
             a.style.display = 'none';
             a.href = currentViewingItem.url;
             
-            // Format name: VID_12345.webm or IMG_12345.jpg
             const prefix = currentViewingItem.type === 'image' ? 'IMG' : 'VID';
             a.download = `${prefix}_${currentViewingItem.id}.${currentViewingItem.ext}`;
             
@@ -587,8 +690,23 @@
             document.body.removeChild(a);
         });
 
+        viewerDeleteBtn.addEventListener('click', async () => {
+            if (!currentViewingItem || !currentUser) return;
+            showToast("DELETING...");
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'gallery', currentViewingItem.id));
+                viewerContent.innerHTML = '';
+                mediaViewer.style.display = 'none';
+                currentViewingItem = null;
+                showToast("FILE DELETED");
+            } catch (e) {
+                console.error(e);
+                showToast("FAILED TO DELETE");
+            }
+        });
+
         // ----------------------------------------------------
-        // IMAGE PROCESSING LOOP & GLITCH ENGINE
+        // GLITCH & FILTER RENDER LOOP
         // ----------------------------------------------------
         function renderLoop(timestamp) {
             requestAnimationFrame(renderLoop);
@@ -620,7 +738,7 @@
                 let imgData = offCtx.getImageData(0, 0, INTERNAL_WIDTH, INTERNAL_HEIGHT);
                 let data = imgData.data;
 
-                const contrast = 55; // Lowered contrast slightly for smoother transitions
+                const contrast = 55; 
                 const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
                 const saturation = 0.85; 
 
@@ -636,7 +754,7 @@
 
                     let luma = 0.299 * r + 0.587 * g + 0.114 * b;
 
-                    // Crushing (Smoothed out the intensity of the pure blacks and whites)
+                    // Crushing
                     if (luma > 180) {
                         const over = (luma - 180) * 1.2; 
                         r += over; g += over; b += over;
@@ -656,12 +774,8 @@
                     data[i + 2] = Math.min(255, Math.max(0, b));
                 }
 
-                // ==========================================
-                // GLITCH ENGINE (Only triggers during video recording)
-                // ==========================================
-                if (isRecording && Math.random() < 0.15) { // Slightly lower glitch chance due to higher FPS
-                    
-                    // Horizontal Tearing
+                // GLITCH ENGINE (Triggers during recording)
+                if (isRecording && Math.random() < 0.15) { 
                     if (Math.random() > 0.3) {
                         const startY = Math.floor(Math.random() * INTERNAL_HEIGHT);
                         const sliceHeight = Math.floor(Math.random() * 25) + 5; 
@@ -673,15 +787,14 @@
                                 if (targetX >= 0 && targetX < INTERNAL_WIDTH) {
                                     let srcIdx = (y * INTERNAL_WIDTH + x) * 4;
                                     let dstIdx = (y * INTERNAL_WIDTH + targetX) * 4;
-                                    data[dstIdx] = data[srcIdx];     // R
-                                    data[dstIdx+1] = data[srcIdx+1]; // G
-                                    data[dstIdx+2] = data[srcIdx+2]; // B
+                                    data[dstIdx] = data[srcIdx];     
+                                    data[dstIdx+1] = data[srcIdx+1]; 
+                                    data[dstIdx+2] = data[srcIdx+2]; 
                                 }
                             }
                         }
                     }
 
-                    // Color Block Corruption
                     if (Math.random() > 0.7) {
                         const blockX = Math.floor(Math.random() * INTERNAL_WIDTH);
                         const blockY = Math.floor(Math.random() * INTERNAL_HEIGHT);
@@ -701,7 +814,6 @@
                 
                 offCtx.putImageData(imgData, 0, 0);
 
-                // Draw to main screen
                 const displayAspect = displayCanvas.width / displayCanvas.height;
                 let finalWidth = displayCanvas.width;
                 let finalHeight = displayCanvas.height;
