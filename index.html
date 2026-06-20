@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>2004 Flip Phone Recorder</title>
+    <title>2006 Retro Cam Recorder</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -114,6 +114,7 @@
             backdrop-filter: blur(4px);
             cursor: pointer;
             text-shadow: 1px 1px 0 #000;
+            transition: transform 0.1s, background 0.1s;
         }
 
         .control-btn:active {
@@ -188,7 +189,7 @@
 
     <div id="start-screen">
         <h1 class="text-3xl font-bold mb-2 text-center text-white">Media Recorder</h1>
-        <p class="text-sm mb-8 text-center text-gray-400">Save to Device Enabled</p>
+        <p class="text-sm mb-8 text-center text-gray-400">Standard Quality</p>
         
         <button id="start-btn" class="launch-btn">Open Camera</button>
         <div id="error-msg"></div>
@@ -210,14 +211,16 @@
         const photoBtn = document.getElementById('photo-btn');
         const videoBtn = document.getElementById('video-btn');
 
-        // Capture Settings
-        const TARGET_FPS = 12; // Choppy framerate
+        // Capture Settings (UPGRADED CLARITY)
+        const TARGET_FPS = 15; // Slightly smoother, 15fps was common for early web/phone video
         const frameInterval = 1000 / TARGET_FPS;
         let lastFrameTime = 0;
         
-        // Internal processing resolution (QCIF standard for old phones)
-        const INTERNAL_WIDTH = 176;
-        const INTERNAL_HEIGHT = 144; 
+        // Internal processing resolution (Bumped to QVGA: 320x240)
+        // This is 4x as many pixels as before. It removes the chunky pixelation
+        // but keeps the soft, mushy, compressed feel when stretched to a modern screen.
+        const INTERNAL_WIDTH = 320;
+        const INTERNAL_HEIGHT = 240; 
         
         const offCanvas = document.createElement('canvas');
         offCanvas.width = INTERNAL_WIDTH;
@@ -293,7 +296,6 @@
         // MEDIA CAPTURE LOGIC
         // ----------------------------------------------------
 
-        // Download helper
         function triggerDownload(url, filename) {
             const a = document.createElement('a');
             a.style.display = 'none';
@@ -308,14 +310,14 @@
 
         // Take Photo
         photoBtn.addEventListener('click', () => {
-            if (isRecording) return; // Don't allow photo while recording
+            if (isRecording) return; 
 
             // Flash effect
             flash.style.opacity = 1;
             setTimeout(() => flash.style.opacity = 0, 150);
 
-            // Export current canvas as JPEG (Low quality for retro feel)
-            const dataURL = displayCanvas.toDataURL('image/jpeg', 0.6);
+            // Export current canvas as JPEG (0.7 quality leaves slight artifacting, perfect for retro)
+            const dataURL = displayCanvas.toDataURL('image/jpeg', 0.7);
             triggerDownload(dataURL, `IMG_${Date.now()}.jpg`);
         });
 
@@ -331,10 +333,8 @@
         function startRecording() {
             recordedChunks = [];
             
-            // Capture stream directly from the canvas we are drawing to
             const stream = displayCanvas.captureStream(TARGET_FPS);
             
-            // Determine best supported format (MP4 for iOS/Safari, WebM for Chrome/Android)
             let options = { mimeType: 'video/webm;codecs=vp9' };
             if (!MediaRecorder.isTypeSupported(options.mimeType)) {
                 options = { mimeType: 'video/webm' };
@@ -392,7 +392,6 @@
             photoBtn.style.opacity = "1";
             recIndicator.style.visibility = "hidden";
             
-            // Stop Timer
             clearInterval(recordingTimerInterval);
         }
 
@@ -408,7 +407,7 @@
 
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 
-                // 1. Draw raw video to tiny canvas
+                // 1. Draw raw video to processing canvas (now 320x240)
                 const videoAspect = video.videoWidth / video.videoHeight;
                 const canvasAspect = INTERNAL_WIDTH / INTERNAL_HEIGHT;
                 
@@ -431,9 +430,9 @@
                 let imgData = offCtx.getImageData(0, 0, INTERNAL_WIDTH, INTERNAL_HEIGHT);
                 let data = imgData.data;
 
-                const contrast = 75; 
+                const contrast = 65; // Slightly reduced contrast from 75 for better clarity
                 const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-                const saturation = 0.35; 
+                const saturation = 0.40; // Slightly more color
 
                 for (let i = 0; i < data.length; i += 4) {
                     let r = data[i];
@@ -447,12 +446,12 @@
 
                     let luma = 0.299 * r + 0.587 * g + 0.114 * b;
 
-                    // Highlight Blooming & Shadow Crushing
-                    if (luma > 160) {
-                        const over = (luma - 160) * 1.8;
+                    // Highlight Blooming & Shadow Crushing (Slightly relaxed)
+                    if (luma > 170) {
+                        const over = (luma - 170) * 1.5; // Blooms slightly later and softer
                         r += over; g += over; b += over;
-                    } else if (luma < 90) {
-                        const under = (90 - luma) * 1.5;
+                    } else if (luma < 80) {
+                        const under = (80 - luma) * 1.2; // Crushes darks less aggressively 
                         r -= under; g -= under; b -= under;
                     }
 
