@@ -333,7 +333,7 @@
 
     <!-- Boot Screen -->
     <div id="start-screen">
-        <h1 class="text-3xl font-bold mb-2 text-center text-white">Media Recorder</h1>
+        <h1 class="text-3xl font-bold mb-2 text-center text-white">Retro Cam OS</h1>
         <p class="text-sm mb-4 text-center text-gray-400">Unlimited Recording Active</p>
         <p class="text-xs mb-8 text-center text-gray-500">Saves locally to device storage</p>
         <button id="start-btn" class="launch-btn">Power On</button>
@@ -717,7 +717,7 @@
         });
 
         // ----------------------------------------------------
-        // GLITCH & FILTER RENDER LOOP
+        // FILTER RENDER LOOP (No Glitches)
         // ----------------------------------------------------
         function renderLoop(timestamp) {
             requestAnimationFrame(renderLoop);
@@ -784,44 +784,6 @@
                     data[i + 1] = Math.min(255, Math.max(0, g));
                     data[i + 2] = Math.min(255, Math.max(0, b));
                 }
-
-                // GLITCH ENGINE (Triggers during recording)
-                if (isRecording && Math.random() < 0.15) { 
-                    if (Math.random() > 0.3) {
-                        const startY = Math.floor(Math.random() * INTERNAL_HEIGHT);
-                        const sliceHeight = Math.floor(Math.random() * 25) + 5; 
-                        const shiftX = Math.floor((Math.random() - 0.5) * 40); 
-                        
-                        for (let y = startY; y < startY + sliceHeight && y < INTERNAL_HEIGHT; y++) {
-                            for (let x = 0; x < INTERNAL_WIDTH; x++) {
-                                let targetX = x + shiftX;
-                                if (targetX >= 0 && targetX < INTERNAL_WIDTH) {
-                                    let srcIdx = (y * INTERNAL_WIDTH + x) * 4;
-                                    let dstIdx = (y * INTERNAL_WIDTH + targetX) * 4;
-                                    data[dstIdx] = data[srcIdx];     
-                                    data[dstIdx+1] = data[srcIdx+1]; 
-                                    data[dstIdx+2] = data[srcIdx+2]; 
-                                }
-                            }
-                        }
-                    }
-
-                    if (Math.random() > 0.7) {
-                        const blockX = Math.floor(Math.random() * INTERNAL_WIDTH);
-                        const blockY = Math.floor(Math.random() * INTERNAL_HEIGHT);
-                        const blockSize = Math.floor(Math.random() * 50) + 15;
-                        const corruptR = Math.random() > 0.5 ? 255 : 0;
-                        const corruptG = Math.random() > 0.5 ? 255 : 0;
-
-                        for (let y = blockY; y < blockY + blockSize && y < INTERNAL_HEIGHT; y+=2) {
-                            for (let x = blockX; x < blockX + blockSize && x < INTERNAL_WIDTH; x+=2) {
-                                let idx = (y * INTERNAL_WIDTH + x) * 4;
-                                data[idx] = corruptR; 
-                                data[idx+1] = corruptG; 
-                            }
-                        }
-                    }
-                }
                 
                 offCtx.putImageData(imgData, 0, 0);
 
@@ -845,6 +807,5 @@
     </script>
 </body>
 </html>
-
 
 ```
