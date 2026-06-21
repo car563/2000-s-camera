@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Unlimited Retro Cam</title>
+    <title>Unlimited Retro Cam (VGA)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -334,7 +334,7 @@
     <!-- Boot Screen -->
     <div id="start-screen">
         <h1 class="text-3xl font-bold mb-2 text-center text-white">Retro Cam OS</h1>
-        <p class="text-sm mb-4 text-center text-gray-400">Unlimited Recording Active</p>
+        <p class="text-sm mb-4 text-center text-gray-400">VGA Resolution Active</p>
         <p class="text-xs mb-8 text-center text-gray-500">Saves locally to device storage</p>
         <button id="start-btn" class="launch-btn">Power On</button>
         <div id="error-msg"></div>
@@ -470,8 +470,10 @@
         const frameInterval = 1000 / TARGET_FPS;
         let lastFrameTime = 0;
         
-        const INTERNAL_WIDTH = 480;
-        const INTERNAL_HEIGHT = 360; 
+        // INCREASED RESOLUTION: Now 640x480 (Standard VGA)
+        // This makes the image notably sharper and less mushy while keeping color grading.
+        const INTERNAL_WIDTH = 640;
+        const INTERNAL_HEIGHT = 480; 
         
         const offCanvas = document.createElement('canvas');
         offCanvas.width = INTERNAL_WIDTH;
@@ -504,7 +506,7 @@
             displayCanvas.width = window.innerWidth;
             displayCanvas.height = window.innerHeight;
             ctx.imageSmoothingEnabled = true; 
-            ctx.imageSmoothingQuality = 'medium'; 
+            ctx.imageSmoothingQuality = 'high'; 
         }
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
@@ -551,7 +553,7 @@
 
             displayCanvas.toBlob((blob) => {
                 saveToDB(blob, 'image', 'jpg');
-            }, 'image/jpeg', 0.8); 
+            }, 'image/jpeg', 0.9); 
         });
 
         videoBtn.addEventListener('click', () => {
@@ -807,5 +809,6 @@
     </script>
 </body>
 </html>
+
 
 ```
